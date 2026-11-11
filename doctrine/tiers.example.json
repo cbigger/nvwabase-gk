@@ -1,0 +1,19 @@
+{
+  "_comment": "Example model-tier map. Point FG_TIERS at this file (or pass the JSON inline) to route roles -> tiers -> models. Every key is optional; omitted keys fall back to defaults (both tiers -> FG_MODEL, so a single-model setup needs no config at all). base_url/token are optional per tier for a multi-provider key pool; omit them to use the ambient ANTHROPIC_* environment.",
+  "tiers": {
+    "strong": { "model": "opus", "base_url": "", "token": "" },
+    "cheap": { "model": "haiku", "base_url": "", "token": "" }
+  },
+  "roles": {
+    "commander": "strong",
+    "senior": "strong",
+    "verifier": "strong",
+    "worker": "cheap",
+    "scout": "cheap",
+    "chore": "cheap"
+  },
+  "limits": {
+    "max_strong_concurrent": 3,
+    "backup_pool": []
+  }
+}

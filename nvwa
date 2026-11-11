@@ -37,6 +37,31 @@ mkdir -p "$ROOT"
 log() { printf '[nvwa] %s\n' "$*" >&2; }
 die() { printf '[nvwa] ERROR: %s\n' "$*" >&2; exit 1; }
 
+WORKERS_DIR="$ROOT/workers"   # one <name>.tier tag per live worker (tiering)
+
+# Run a graph command via the fgc CLI if present, else the bundled lib/fg.py.
+fgc_call() {
+  if command -v "$FGC" >/dev/null 2>&1; then
+    "$FGC" "$@"
+  else
+    python3 "$SCRIPT_DIR/lib/fg.py" "$@"
+  fi
+}
+
+# Count strong-tier workers still live, pruning tags whose tmux window is gone.
+count_active_strong() {
+  local n=0 f wn live
+  [[ -d "$WORKERS_DIR" ]] || { echo 0; return 0; }
+  live=$(tmux list-windows -t "$SESSION" -F '#W' 2>/dev/null || true)
+  for f in "$WORKERS_DIR"/*.tier; do
+    [[ -e "$f" ]] || continue
+    wn=$(basename "$f" .tier)
+    if ! printf '%s\n' "$live" | grep -qx -- "$wn"; then rm -f "$f"; continue; fi
+    [[ "$(cat "$f" 2>/dev/null)" == "strong" ]] && n=$((n+1))
+  done
+  echo "$n"
+}
+
 # ─── tmux primitives (same rules as sapper: send-keys -l only, never paste) ──
 pane_text()   { tmux capture-pane -pt "$SESSION:$1" 2>/dev/null; }
 
@@ -87,6 +112,7 @@ wait_input_box() {
 # ─── Create: spawn a new AI agent ────────────────────────────────────────────
 cmd_spawn() {
   local name="" agent="${NVWA_AGENT:-claude}" mission="" minutes="" a
+  local tier="" role="" model=""
   while (( $# )); do
     a=$1; shift
     case "$a" in
@@ -94,6 +120,9 @@ cmd_spawn() {
       --agent)   agent="$1"; shift ;;
       --mission) mission="$1"; shift ;;
       --minutes) minutes="$1"; shift ;;
+      --tier)    tier="$1"; shift ;;
+      --role)    role="$1"; shift ;;
+      --model)   model="$1"; shift ;;
       -*) die "spawn: unknown option $a" ;;
       *)  [[ -z "$name" ]] && name="$a" || die "spawn: unexpected argument $a" ;;
     esac
@@ -106,13 +135,39 @@ cmd_spawn() {
   local nw; nw=$(tmux list-windows -t "$SESSION" -F '#W' 2>/dev/null | grep -vc '^nvwa$' || echo 0)
   (( nw >= MAX_WORKERS )) && die "CAP: $nw/$MAX_WORKERS agents — nvwa kill one first"
 
+  # resolve the model tier (role default: worker -> cheap) and enforce the
+  # strong-concurrency cap BEFORE committing a window.
+  local active_strong; active_strong=$(count_active_strong)
+  local -a targ=(tier can-spawn --active-strong "$active_strong")
+  [[ -n "$role"  ]] && targ+=(--role "$role")
+  [[ -n "$tier"  ]] && targ+=(--tier "$tier")
+  [[ -n "$model" ]] && targ+=(--model "$model")
+  local resolve_out rc
+  resolve_out=$(fgc_call "${targ[@]}" 2>&1); rc=$?
+  (( rc != 0 )) && die "${resolve_out#fgc: }"
+  local r_tier="" r_model="" r_base="" r_token="" k v
+  while IFS=$'\t' read -r k v; do
+    case "$k" in
+      tier)     r_tier="$v" ;;
+      model)    r_model="$v" ;;
+      base_url) r_base="$v" ;;
+      token)    r_token="$v" ;;
+    esac
+  done <<< "$resolve_out"
+
   # kill stale window if re-spawning same name
   tmux kill-window -t "$SESSION:$name" 2>/dev/null
 
-  # launch the agent
+  # launch the agent, injecting the tier's model/endpoint via env for any
+  # Anthropic-compatible CLI (empty vars are simply omitted)
+  local launch_env=""
+  [[ -n "$r_model" ]] && launch_env+="ANTHROPIC_MODEL=$(printf %q "$r_model") "
+  [[ -n "$r_base"  ]] && launch_env+="ANTHROPIC_BASE_URL=$(printf %q "$r_base") "
+  [[ -n "$r_token" ]] && launch_env+="ANTHROPIC_API_KEY=$(printf %q "$r_token") "
   tmux new-window -d -t "$SESSION" -n "$name" \
-    "$agent 2>&1; echo NVWA_PANE_EXITED; exec sleep infinity"
-  log "$name: spawned ($agent)"
+    "${launch_env}$agent 2>&1; echo NVWA_PANE_EXITED; exec sleep infinity"
+  mkdir -p "$WORKERS_DIR"; printf '%s\n' "$r_tier" > "$WORKERS_DIR/$name.tier"
+  log "$name: spawned ($agent, tier=$r_tier model=$r_model)"
 
   # wait for input box, then send mission
   if wait_input_box "$name"; then
@@ -123,7 +178,7 @@ cmd_spawn() {
   else
     log "$name: input box never appeared (60s) — pane left for inspection"
   fi
-  printf 'SPAWNED %s agent=%s\n' "$name" "$agent"
+  printf 'SPAWNED %s agent=%s tier=%s model=%s\n' "$name" "$agent" "$r_tier" "$r_model"
 }
 
 # ─── Language: say / listen ─────────────────────────────────────────────────
@@ -159,6 +214,7 @@ cmd_list() {
 cmd_kill() {
   local name="${1:-}"
   [[ -n "$name" ]] || die 'usage: nvwa kill <name>'
+  rm -f "$WORKERS_DIR/$name.tier" 2>/dev/null
   tmux kill-window -t "$SESSION:$name" 2>/dev/null && log "killed $name" || log "kill: $name already gone"
 }
 
@@ -185,7 +241,10 @@ nvwa — the Nüwa Foundation CLI (Create + Language + History)
 
 Create:
   spawn [--name NAME] [--agent CMD] [--mission "..."]    start a new AI agent
-                                                          --agent: any interactive CLI (default: claude)
+        [--role R] [--tier T] [--model M]                 --agent: any interactive CLI (default: claude)
+                                                          --role/--tier/--model: pick the model tier
+                                                          (default role: worker -> cheap). The resolved
+                                                          model/endpoint are injected as ANTHROPIC_* env.
   kill <name>                                             stop an agent
 
 Language:
@@ -197,13 +256,22 @@ Roster:
   board                                                   agents + graph state
 
 History (same as fgc — shared fact-intent graph):
-  fact / intent / status / graph / frontier / recall / dispatch / auto / ...
+  fact / intent / status / graph / frontier / recall / dispatch / auto / tier / ...
   All fgc commands pass through transparently.
 
+Tiering (strong model for commander/hard work, cheap for the worker mass):
+  fgc tier show                      inspect the resolved role->tier->model map
+  fgc tier resolve --role commander  print the model a role resolves to
+  Configure via FG_TIERS (inline JSON or a path); see doctrine/tiers.example.json
+  and doctrine/commander-doctrine.md Part B. With no config it degrades to one
+  model for every tier.
+
 Environment:
-  NVWA_SESSION   tmux session name (default: nvwa)
-  NVWA_AGENT     default agent command for spawn (default: claude)
+  NVWA_SESSION      tmux session name (default: nvwa)
+  NVWA_AGENT        default agent command for spawn (default: claude)
   NVWA_MAX_WORKERS  max concurrent agents (default: 8)
+  FG_TIERS          model-tier map: inline JSON or a path to a JSON file
+  FG_MODEL          default model when no tier map is configured (default: sonnet)
 USAGE
     ;;
   *)

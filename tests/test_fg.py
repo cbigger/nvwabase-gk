@@ -290,5 +290,101 @@ class PeerConfigTests(unittest.TestCase):
             self.assertFalse((project / ".fg" / "project.json").exists())
 
 
+class TierTests(unittest.TestCase):
+    def test_default_map_resolves_every_role_to_default_model(self):
+        cfg = fg.load_tier_config(raw=None)
+        for role in ("commander", "senior", "verifier", "worker", "scout", "chore"):
+            self.assertEqual(
+                fg.resolve_model(cfg, role=role), fg._default_model(),
+                f"role {role} should resolve to the default model with no config",
+            )
+
+    def test_fg_model_env_sets_the_default(self):
+        with mock.patch.dict(fg.os.environ, {"FG_MODEL": "my-model"}, clear=False):
+            cfg = fg.load_tier_config(raw=None)
+            self.assertEqual(fg.resolve_model(cfg, role="worker"), "my-model")
+
+    def test_configured_map_routes_roles_to_tiers(self):
+        raw = json.dumps({
+            "tiers": {"strong": {"model": "opus"}, "cheap": {"model": "haiku"}},
+        })
+        cfg = fg.load_tier_config(raw=raw)
+        self.assertEqual(fg.resolve_model(cfg, role="commander"), "opus")
+        self.assertEqual(fg.resolve_model(cfg, role="verifier"), "opus")
+        self.assertEqual(fg.resolve_model(cfg, role="worker"), "haiku")
+        self.assertEqual(fg.resolve_model(cfg, role="scout"), "haiku")
+
+    def test_explicit_model_and_tier_override_role(self):
+        raw = json.dumps({"tiers": {"strong": {"model": "opus"}, "cheap": {"model": "haiku"}}})
+        cfg = fg.load_tier_config(raw=raw)
+        self.assertEqual(fg.resolve_model(cfg, role="worker", model="forced"), "forced")
+        self.assertEqual(fg.resolve_model(cfg, role="worker", tier="strong"), "opus")
+
+    def test_default_role_is_worker(self):
+        raw = json.dumps({"tiers": {"strong": {"model": "opus"}, "cheap": {"model": "haiku"}}})
+        cfg = fg.load_tier_config(raw=raw)
+        self.assertEqual(fg.resolve_tier(cfg), "cheap")
+        self.assertEqual(fg.resolve_model(cfg), "haiku")
+
+    def test_partial_tier_config_keeps_default_model(self):
+        # adding only an endpoint to strong must not drop its default model
+        raw = json.dumps({"tiers": {"strong": {"base_url": "https://x/v1"}}})
+        cfg = fg.load_tier_config(raw=raw)
+        self.assertEqual(fg.resolve_model(cfg, tier="strong"), fg._default_model())
+        self.assertEqual(fg.tier_connection(cfg, "strong"), {"base_url": "https://x/v1"})
+
+    def test_unknown_role_and_tier_error(self):
+        cfg = fg.load_tier_config(raw="{}")
+        with self.assertRaisesRegex(fg.FGError, "unknown role"):
+            fg.resolve_tier(cfg, role="nope")
+        with self.assertRaisesRegex(fg.FGError, "unknown tier"):
+            fg.resolve_tier(cfg, tier="nope")
+
+    def test_invalid_json_and_non_object_error(self):
+        with self.assertRaisesRegex(fg.FGError, "invalid tier config JSON"):
+            fg.load_tier_config(raw="{not json")
+        with self.assertRaisesRegex(fg.FGError, "must be a JSON object"):
+            fg.load_tier_config(raw="[1,2,3]")
+
+    def test_tier_with_empty_model_rejected(self):
+        with self.assertRaisesRegex(fg.FGError, "non-empty model"):
+            fg.load_tier_config(raw=json.dumps({"tiers": {"cheap": {"model": ""}}}))
+
+    def test_config_from_file_path(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "tiers.json"
+            p.write_text(json.dumps({"tiers": {"cheap": {"model": "from-file"}}}), encoding="utf-8")
+            cfg = fg.load_tier_config(raw=str(p))
+            self.assertEqual(fg.resolve_model(cfg, role="worker"), "from-file")
+
+    def test_missing_config_file_errors(self):
+        with self.assertRaisesRegex(fg.FGError, "tier config file not found"):
+            fg.load_tier_config(raw="/no/such/tiers.json")
+
+    def test_strong_cap_default_and_override(self):
+        self.assertEqual(fg.strong_cap(fg.load_tier_config(raw="{}")), 3)
+        cfg = fg.load_tier_config(raw=json.dumps({"limits": {"max_strong_concurrent": 1}}))
+        self.assertEqual(fg.strong_cap(cfg), 1)
+
+    def test_can_spawn_enforces_strong_cap(self):
+        raw = json.dumps({"limits": {"max_strong_concurrent": 2}})
+        env = {"FG_TIERS": raw}
+        with mock.patch.dict(fg.os.environ, env, clear=False):
+            under = type("A", (), {"tier_action": "can-spawn", "role": "commander",
+                                   "tier": None, "model": None, "active_strong": 1})()
+            self.assertEqual(fg.cmd_tier(under), 0)
+            at_cap = type("A", (), {"tier_action": "can-spawn", "role": "commander",
+                                    "tier": None, "model": None, "active_strong": 2})()
+            stderr = io.StringIO()
+            with contextlib.redirect_stderr(stderr):
+                rc = fg.cmd_tier(at_cap)
+            self.assertEqual(rc, 3)
+            self.assertIn("strong-tier cap reached", stderr.getvalue())
+            # cheap tier is never capped
+            cheap = type("A", (), {"tier_action": "can-spawn", "role": "worker",
+                                   "tier": None, "model": None, "active_strong": 99})()
+            self.assertEqual(fg.cmd_tier(cheap), 0)
+
+
 if __name__ == "__main__":
     unittest.main()
