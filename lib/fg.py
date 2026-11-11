@@ -1770,6 +1770,52 @@ def cmd_tier(args) -> int:
     raise FGError(f"unknown tier action '{action}'")
 
 
+def cmd_kb(args) -> int:
+    """Query/manage the domain knowledge base (reference, not the graph)."""
+    import kb as kbmod
+    store = kbmod.KB(kbmod.resolve_kb_root(args.kb))
+    action = args.kb_action
+    try:
+        if action == "search":
+            matches = store.search(args.target, limit=args.limit)
+            if not matches:
+                print("(no matching KB entries)")
+                return 0
+            for m in matches:
+                print(f"{m['id']}\t[{m['score']}]\t{m['title']}")
+            return 0
+        if action == "list":
+            entries = store.list()
+            if not entries:
+                print("(KB is empty)")
+                return 0
+            for e in entries:
+                tags = ", ".join(e.get("tags", []))
+                print(f"{e['id']}\t{e['title']}" + (f"\t({tags})" if tags else ""))
+            return 0
+        if action == "show":
+            if not args.target:
+                raise FGError("kb show needs an entry id")
+            e = store.get(args.target)
+            print(f"# {e['title']}  [{e['id']}]")
+            if e.get("tags"):
+                print("tags: " + ", ".join(e["tags"]))
+            print()
+            print(e.get("body", ""))
+            return 0
+        if action == "add":
+            if not args.title:
+                raise FGError("kb add needs --title")
+            tags = [t for t in (args.tags or "").split(",") if t.strip()]
+            e = store.add(args.title, body=args.body or "", tags=tags,
+                          entry_id=args.id, overwrite=args.force)
+            print(f"added KB entry '{e['id']}'")
+            return 0
+    except kbmod.KBError as exc:
+        raise FGError(str(exc))
+    raise FGError(f"unknown kb action '{action}'")
+
+
 # -- dispatch (LLM) --
 def cmd_dispatch(args) -> int:
     store = Store(Path(args.store))
@@ -3434,6 +3480,27 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--active-strong", type=int, default=0,
                     help="(can-spawn) number of strong workers already running")
     sp.set_defaults(func=cmd_tier)
+
+    sp = sub.add_parser(
+        "kb",
+        help="domain knowledge base — reference the swarm looks things up in",
+        description=(
+            "A static reference shelf, distinct from the live fact graph. Entries "
+            "live under the KB root (--kb, else FG_KB env, else the repo's kb/). "
+            "Workers consult it before improvising; add your domain's playbooks."
+        ),
+    )
+    sp.add_argument("kb_action", choices=["search", "list", "show", "add"])
+    sp.add_argument("target", nargs="?", default="",
+                    help="search query, or entry id for show")
+    sp.add_argument("--limit", type=int, default=5, help="(search) max results")
+    sp.add_argument("--id", default=None, help="(add) explicit entry id")
+    sp.add_argument("--title", default=None, help="(add) entry title")
+    sp.add_argument("--body", default=None, help="(add) entry body text")
+    sp.add_argument("--tags", default=None, help="(add) comma-separated tags")
+    sp.add_argument("--kb", default=None, help="KB root (default: FG_KB or repo kb/)")
+    sp.add_argument("--force", action="store_true", help="(add) overwrite existing entry")
+    sp.set_defaults(func=cmd_kb)
 
     return p
 

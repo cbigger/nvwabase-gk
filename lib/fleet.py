@@ -32,6 +32,8 @@ import fg  # noqa: E402  (the single-graph engine; same dir)
 
 STORE_NAME = ".fg"
 STATE_NAME = "fleet-state.json"
+COMMANDER_STATE_NAME = "commander-state.json"
+_HISTORY_KEEP = 20
 DEFAULT_FLEET = os.environ.get("FLEET_ROOT", ".fleet")
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 NVWA_BIN = Path(__file__).resolve().parent.parent / "nvwa"
@@ -91,10 +93,35 @@ class Fleet:
         return data
 
     def save_state(self, state: dict) -> None:
+        self._atomic_write(self._state_path(), state)
+
+    def _atomic_write(self, path: Path, data: dict) -> None:
         self.root.mkdir(parents=True, exist_ok=True)
-        tmp = self._state_path().with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self._state_path())
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+
+    # -- commander state (continuity across watchdog relaunches, doctrine §5) -
+    def _commander_state_path(self) -> Path:
+        return self.root / COMMANDER_STATE_NAME
+
+    def load_commander_state(self) -> dict:
+        p = self._commander_state_path()
+        if not p.exists():
+            return {"iterations": 0, "history": [], "stopped": False, "stop_reason": ""}
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            raise FleetError(f"cannot read commander state {p}: {exc}")
+        if not isinstance(data, dict) or not isinstance(data.get("iterations"), int):
+            raise FleetError("invalid commander state: expected an int 'iterations'")
+        data.setdefault("history", [])
+        data.setdefault("stopped", False)
+        data.setdefault("stop_reason", "")
+        return data
+
+    def save_commander_state(self, state: dict) -> None:
+        self._atomic_write(self._commander_state_path(), state)
 
     # -- unit discovery ------------------------------------------------------
     def units(self) -> list[Unit]:
@@ -286,6 +313,46 @@ def command_step(fleet: Fleet, *, model=None, tier=None, role=None,
     return decision
 
 
+def command_loop(fleet: Fleet, *, interval=30, max_cycles=0, deadline_min=0,
+                 **step_kwargs) -> int:
+    """Run the commander's tempo loop until stop / max-cycles / deadline.
+
+    Continuity: iteration count and a trimmed decision history persist to
+    ``commander-state.json`` every cycle, so a watchdog relaunch resumes as its
+    own successor (doctrine §5) rather than starting cold. Returns 10 if the
+    commander signalled stop, else 0."""
+    state = fleet.load_commander_state()
+    start = time.time()
+    deadline = start + deadline_min * 60 if deadline_min else None
+    stopped = False
+    while True:
+        if max_cycles and state["iterations"] >= max_cycles:
+            print(f"[loop] max cycles ({max_cycles}) reached")
+            break
+        if deadline and time.time() >= deadline:
+            print(f"[loop] deadline ({deadline_min}m) reached")
+            break
+        decision = command_step(fleet, **step_kwargs)
+        state["iterations"] += 1
+        state["history"].append({
+            "cycle": state["iterations"],
+            "action": decision.get("action"),
+            "target": decision.get("target"),
+            "note": decision.get("note") or decision.get("reason") or "",
+        })
+        state["history"] = state["history"][-_HISTORY_KEEP:]
+        if decision.get("action") == "stop":
+            state["stopped"] = True
+            state["stop_reason"] = decision.get("reason", "")
+            stopped = True
+            fleet.save_commander_state(state)
+            break
+        fleet.save_commander_state(state)
+        time.sleep(interval)
+    print(f"[loop] done after {state['iterations']} cycle(s)")
+    return 10 if stopped else 0
+
+
 # --------------------------------------------------------------------------- #
 # round-robin driver (`sweep`) — no LLM, just cycle auto over open units
 # --------------------------------------------------------------------------- #
@@ -386,9 +453,13 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--budget", default="", help="time/token budget to show as budget_left")
     sp.set_defaults(func=cmd_status)
 
-    sp = sub.add_parser("command", help="one LLM allocation step across the fleet")
+    sp = sub.add_parser("command", help="LLM allocation step(s) across the fleet")
     _fleet_arg(sp)
     sp.add_argument("--budget", default="", help="time budget passed to the commander")
+    sp.add_argument("--loop", action="store_true", help="run the commander tempo loop")
+    sp.add_argument("--interval", type=int, default=30, help="(loop) seconds between cycles")
+    sp.add_argument("--max-cycles", type=int, default=0, help="(loop) stop after N cycles (0=unbounded)")
+    sp.add_argument("--deadline-min", type=int, default=0, help="(loop) stop after M minutes (0=none)")
     _common_tier_args(sp)
     sp.set_defaults(func=cmd_command)
 
@@ -429,11 +500,17 @@ def cmd_status(args) -> int:
 
 def cmd_command(args) -> int:
     fleet = Fleet(args.fleet)
-    decision = command_step(
-        fleet, model=args.model, tier=args.tier, role=args.role,
+    step_kwargs = dict(
+        model=args.model, tier=args.tier, role=args.role,
         time_budget=args.budget, timeout=args.timeout, skip=args.skip,
         max_steps=args.max_steps, max_explore=args.max_explore,
     )
+    if args.loop:
+        return command_loop(
+            fleet, interval=args.interval, max_cycles=args.max_cycles,
+            deadline_min=args.deadline_min, **step_kwargs,
+        )
+    decision = command_step(fleet, **step_kwargs)
     return 10 if decision.get("action") == "stop" else 0
 
 

@@ -261,13 +261,14 @@ Roster:
 Fleet (multi-graph commander — many per-unit graphs at once):
   fleet init <unit> --goal "..."                          create a unit graph
   fleet status [--budget B]                               cross-graph board
-  command [--budget B]                                    one LLM allocation step (work/hire/fire/stop)
+  command [--budget B] [--loop]                           one LLM allocation step, or the tempo loop
   sweep [--rounds R]                                      round-robin an auto slice over open units
   fleet up | fleet down                                   hire a worker per open unit | stop all
+  (watchdog.sh keeps `command --loop` alive to a deadline — see doctrine/state-and-watchdog.md)
 
 History (same as fgc — shared fact-intent graph):
-  fact / intent / status / graph / frontier / recall / dispatch / auto / tier / ...
-  All fgc commands pass through transparently.
+  fact / intent / status / graph / frontier / recall / dispatch / auto / tier / kb / ...
+  All fgc commands pass through transparently (kb = the domain knowledge base).
 
 Tiering (strong model for commander/hard work, cheap for the worker mass):
   fgc tier show                      inspect the resolved role->tier->model map
