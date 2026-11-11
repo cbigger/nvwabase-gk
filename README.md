@@ -31,11 +31,13 @@ The first worked domain is defensive **incident response** — see
 - **Layered memory** — each node has a title, a one-line description, and an
   optional detailed doc; prompts get the summary layer, depth is opt-in via
   `fgc doc <id>`, so context stays lean.
-- **Plain facts, domain taxonomy by convention** — `fgc fact "<observation>"`
-  records a node (with an optional `--title` and `--doc`). The engine stores
-  plain facts; a domain's "kinds" (incident response uses `alert`, `indicator`,
-  `host`, `account`, `timeline`, `finding`, `containment`) are a naming
-  convention the doctrine applies in the fact's wording, not a CLI flag.
+- **Typed facts, neutral mechanism** — `fgc fact "<obs>" -k <kind> -d key=value`
+  records a node with an optional domain `kind` (a free-form slug) and a bag of
+  `key=value` attributes, so the commander can count and correlate on them
+  (`fgc graph -k indicator`). The engine never enumerates kinds — it stores
+  arbitrary strings; a domain's doctrine supplies the vocabulary (incident
+  response uses `alert`, `indicator`, `host`, `account`, `timeline`, `finding`,
+  `containment`). Untyped facts default to `note`, so the feature is opt-in.
 - **Sub-agent dispatch** — `fgc dispatch reason|explore|verify|brainstorm|blindspot`:
   a commander proposes, executors work, verifiers check; every conclusion is
   written back into the graph. `fgc auto` runs the loop to the goal or budget.

@@ -39,6 +39,85 @@ AI_CHANNEL_NAME = "ai-channel.txt"
 PEER_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _UNSET = object()
 
+# Typed facts: a node carries an optional free-form `kind` (a domain type such
+# as "indicator" or "host") plus a `data` bag of key=value attributes. The
+# engine is domain-neutral — it stores arbitrary kind strings and never
+# enumerates them; a domain's doctrine supplies the vocabulary. Untyped nodes
+# default to DEFAULT_KIND, so pre-existing graphs load unchanged.
+DEFAULT_KIND = "note"
+_KIND_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,39}$")
+
+
+def normalize_kind(kind: object) -> str:
+    """Validate/normalize a node kind. None -> DEFAULT_KIND. Kinds are
+    free-form but constrained to a short slug so they stay countable and safe
+    in prompts and the view."""
+    if kind is None:
+        return DEFAULT_KIND
+    if not isinstance(kind, str) or not kind.strip():
+        raise FGError("kind must be a non-empty string")
+    k = kind.strip()
+    if not _KIND_RE.fullmatch(k):
+        raise FGError(
+            "kind must be <=40 chars of letters, digits, '_', '.', '-' "
+            f"(got {kind!r})"
+        )
+    return k
+
+
+def normalize_data(data: object) -> dict:
+    """Validate/normalize a node's key=value data bag. None/empty -> {}.
+    Keys are non-empty slugs; scalar values are coerced to strings so the
+    stored shape is always a flat object of strings."""
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise FGError("data must be an object of key=value pairs")
+    out: dict[str, str] = {}
+    for key, value in data.items():
+        if not isinstance(key, str) or not key.strip():
+            raise FGError("data keys must be non-empty strings")
+        k = key.strip()
+        if isinstance(value, bool):
+            out[k] = "true" if value else "false"
+        elif isinstance(value, (str, int, float)):
+            out[k] = str(value)
+        else:
+            raise FGError(f"data value for {k!r} must be a string or number")
+    return out
+
+
+def parse_data_pairs(pairs: list[str] | None) -> dict:
+    """Parse repeated CLI ``--data key=value`` args into a dict."""
+    out: dict[str, str] = {}
+    for item in pairs or []:
+        if "=" not in item:
+            raise FGError(f"--data expects key=value, got {item!r}")
+        key, value = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise FGError(f"--data key cannot be empty in {item!r}")
+        out[key] = value
+    return out
+
+
+def _build_fact_node(fid: str, description: str, creator: str,
+                     source_intent: str | None, title: str | None,
+                     doc: str | None, kind: object, data: object) -> dict:
+    """Single source of truth for the fact-node shape, shared by add_fact and
+    conclude_with_new_fact so the two paths can never diverge."""
+    return {
+        "id": fid,
+        "title": (title.strip() if title and title.strip() else None),
+        "description": description.strip(),
+        "doc": (doc.strip() if doc and doc.strip() else None),
+        "kind": normalize_kind(kind),
+        "data": normalize_data(data),
+        "created_at": now_iso(),
+        "creator": creator,
+        "source_intent": source_intent,
+    }
+
 # --------------------------------------------------------------------------- #
 # time
 # --------------------------------------------------------------------------- #
@@ -187,13 +266,16 @@ class Store:
         return _read_node(p, "fact")
 
     def add_fact(self, description: str, creator: str, source_intent: str | None,
-                 title: str | None = None, doc: str | None = None) -> dict:
+                 title: str | None = None, doc: str | None = None,
+                 kind: str | None = None, data: dict | None = None) -> dict:
         if not isinstance(description, str) or not description.strip():
             raise FGError("fact description cannot be empty")
         if not isinstance(creator, str) or not creator.strip():
             raise FGError("fact creator cannot be empty")
         if source_intent is not None:
             _validate_lookup_id(source_intent, "intent")
+        kind = normalize_kind(kind)
+        data = normalize_data(data)
         with self.locked():
             source = None
             if source_intent is not None:
@@ -202,15 +284,9 @@ class Store:
                     raise FGError(f"intent {source_intent} already concluded")
                 _check_conclusion_permission(source, creator, allow_unconfirmed=False)
             fid = self._next_id("fact", "f")
-            fact = {
-                "id": fid,
-                "title": (title.strip() if title and title.strip() else None),
-                "description": description.strip(),
-                "doc": (doc.strip() if doc and doc.strip() else None),
-                "created_at": now_iso(),
-                "creator": creator,
-                "source_intent": source_intent,
-            }
+            fact = _build_fact_node(
+                fid, description, creator, source_intent, title, doc, kind, data
+            )
             atomic_write_json(self.facts_dir / f"{fid}.json", fact)
             if source is not None:
                 source["to"] = fid
@@ -252,6 +328,8 @@ class Store:
         requires_confirmation: bool = False,
         title: str | None = None,
         doc: str | None = None,
+        kind: str | None = None,
+        data: dict | None = None,
     ) -> dict:
         if not isinstance(description, str) or not description.strip():
             raise FGError("intent description cannot be empty")
@@ -259,6 +337,8 @@ class Store:
             raise FGError("intent creator cannot be empty")
         if not isinstance(from_ids, list) or any(not isinstance(fid, str) for fid in from_ids):
             raise FGError("intent `from` ids must be a list of strings")
+        kind = normalize_kind(kind)
+        data = normalize_data(data)
         # A hyper-edge only needs each dependency once; de-duplicate model or
         # API input before validation and persistence.
         from_ids = list(dict.fromkeys(from_ids))
@@ -272,6 +352,8 @@ class Store:
                 "to": None,
                 "description": description.strip(),
                 "doc": (doc.strip() if doc and doc.strip() else None),
+                "kind": kind,
+                "data": data,
                 "creator": creator,
                 "status": "open",
                 "worker": None,
@@ -415,6 +497,7 @@ class Store:
         self, iid: str, description: str, worker: str, title: str | None = None,
         doc: str | None = None,
         *,
+        kind: str | None = None, data: dict | None = None,
         allow_unconfirmed: bool = False,
     ) -> tuple[dict, dict]:
         """Atomically: re-check the intent is still open under lock, allocate a new
@@ -433,15 +516,9 @@ class Store:
             if not isinstance(description, str) or not description.strip():
                 raise FGError("fact description cannot be empty")
             fid = self._next_id("fact", "f")
-            fact = {
-                "id": fid,
-                "title": (title.strip() if title and title.strip() else None),
-                "description": description.strip(),
-                "doc": (doc.strip() if doc and doc.strip() else None),
-                "created_at": now_iso(),
-                "creator": worker,
-                "source_intent": iid,
-            }
+            fact = _build_fact_node(
+                fid, description, worker, iid, title, doc, kind, data
+            )
             atomic_write_json(self.facts_dir / f"{fid}.json", fact)
             intent["to"] = fid
             intent["status"] = "done"
@@ -631,6 +708,22 @@ def _node_schema_errors(data: object, kind: str) -> list[str]:
             errors.append("missing string 'creator'")
         if not isinstance(data.get("created_at"), str):
             errors.append("missing string 'created_at'")
+    # Typed-fact fields are optional (pre-existing graphs predate them), so they
+    # are only checked when present. NB: here `kind` is the node TYPE and
+    # `data` is the whole node record; data["kind"]/data["data"] are the typed
+    # fields being validated.
+    if kind in ("fact", "intent"):
+        node_kind = data.get("kind")
+        if node_kind is not None and (
+            not isinstance(node_kind, str) or not _KIND_RE.fullmatch(node_kind)
+        ):
+            errors.append("'kind' must be a short slug string")
+        node_data = data.get("data")
+        if node_data is not None and not (
+            isinstance(node_data, dict)
+            and all(isinstance(k, str) and isinstance(v, str) for k, v in node_data.items())
+        ):
+            errors.append("'data' must be an object of string values")
     return errors
 
 
@@ -1029,8 +1122,21 @@ def render_history_block(store: Store, *, max_facts: int = 8,
     return "\n".join(lines)
 
 
-def render_graph_text(store: Store) -> str:
-    g = build_graph_view(store)
+def node_kind(node: dict) -> str:
+    """The node's domain kind, defaulting for nodes that predate typed facts."""
+    k = node.get("kind")
+    return k if isinstance(k, str) and k.strip() else DEFAULT_KIND
+
+
+def _kind_tag(node: dict) -> str:
+    """A compact `  <kind>` tag for display, shown only for a non-default kind
+    so untyped graphs read exactly as before."""
+    k = node_kind(node)
+    return f"  <{k}>" if k != DEFAULT_KIND else ""
+
+
+def render_graph_text(store: Store, g: dict | None = None) -> str:
+    g = g if g is not None else build_graph_view(store)
     lines = [f"# graph  ({_scrub_inline(g['project']['status'])})"]
     lines.append("")
     lines.append("## facts")
@@ -1038,7 +1144,7 @@ def render_graph_text(store: Store) -> str:
         src = f"  <- {_scrub_inline(f['source_intent'])}" if f.get("source_intent") else ""
         t = f"[{_scrub_inline(f['title'])}]  " if f.get("title") else ""
         doc = "  📄" if f.get("doc") else ""
-        lines.append(f"  {f['id']}: {t}{_scrub_inline(f['description'])}{src}{doc}")
+        lines.append(f"  {f['id']}:{_kind_tag(f)} {t}{_scrub_inline(f['description'])}{src}{doc}")
     lines.append("")
     lines.append("## intents")
     for i in g["intents"]:
@@ -1050,7 +1156,7 @@ def render_graph_text(store: Store) -> str:
             flag = f"  ~{i['worker']}"
         t = f"[{_scrub_inline(i['title'])}]  " if i.get("title") else ""
         doc = "  📄" if i.get("doc") else ""
-        lines.append(f"  {i['id']}: {i['from']} -> {to}  {t}{_scrub_inline(i['description'])[:70]}{flag}{doc}")
+        lines.append(f"  {i['id']}:{_kind_tag(i)} {i['from']} -> {to}  {t}{_scrub_inline(i['description'])[:70]}{flag}{doc}")
     if g["hints"]:
         lines.append("")
         lines.append("## hints")
@@ -1116,6 +1222,7 @@ def _replace_placeholders(template_text: str, replacements: dict[str, str]) -> s
 def _intent_brief(i: dict) -> dict:
     return {
         "id": i["id"],
+        "kind": node_kind(i),
         "from": i["from"],
         "description": i["description"],
         "requires_confirmation": i["requires_confirmation"],
@@ -1140,7 +1247,7 @@ def _to_yaml_like(g: dict) -> str:
         title = f"[{_prompt_inline(f['title'])}] " if f.get("title") else ""
         has_doc = " (has doc)" if f.get("doc") else ""
         lines.append(
-            f"  - {f['id']}: {title}{_prompt_inline(f['description'])}{src}{has_doc}"
+            f"  - {f['id']}:{_kind_tag(f)} {title}{_prompt_inline(f['description'])}{src}{has_doc}"
         )
     lines.append("intents:")
     for i in g["intents"]:
@@ -1151,7 +1258,7 @@ def _to_yaml_like(g: dict) -> str:
         title = f"[{_prompt_inline(i['title'])}] " if i.get("title") else ""
         has_doc = " (has doc)" if i.get("doc") else ""
         lines.append(
-            f"  - {i['id']}: {i['from']} -> {to}{flag} | {title}"
+            f"  - {i['id']}:{_kind_tag(i)} {i['from']} -> {to}{flag} | {title}"
             f"{_prompt_inline(i['description'])}{has_doc}"
         )
     if g["hints"]:
@@ -1367,10 +1474,19 @@ def cmd_status(args) -> int:
 def cmd_graph(args) -> int:
     store = Store(Path(args.store))
     store.require()
+    g = build_graph_view(store)
+    if getattr(args, "kind", None):
+        k = normalize_kind(args.kind)
+        g = dict(g)
+        g["facts"] = [f for f in g["facts"] if node_kind(f) == k]
+        g["intents"] = [i for i in g["intents"] if node_kind(i) == k]
+        g["open_intents"] = [i for i in g["open_intents"] if node_kind(i) == k]
+        g["done_intents"] = [i for i in g["done_intents"] if node_kind(i) == k]
+        g["fact_ids"] = sorted(f["id"] for f in g["facts"])
     if args.format == "json":
-        print(json.dumps(build_graph_view(store), ensure_ascii=False, indent=2))
+        print(json.dumps(g, ensure_ascii=False, indent=2))
     else:
-        print(render_graph_text(store))
+        print(render_graph_text(store, g))
     return 0
 
 
@@ -1391,6 +1507,9 @@ def cmd_frontier(args) -> int:
     store = Store(Path(args.store))
     store.require()
     fr = frontier(store)
+    if getattr(args, "kind", None):
+        k = normalize_kind(args.kind)
+        fr = [i for i in fr if node_kind(i) == k]
     if not fr:
         print("(no ready intents)")
         return 0
@@ -1441,6 +1560,8 @@ def cmd_fact(args) -> int:
         source_intent=args.from_intent,
         title=args.title,
         doc=_read_doc_arg(args),
+        kind=args.kind,
+        data=parse_data_pairs(args.data),
     )
     print(fact["id"])
     if args.json:
@@ -1459,6 +1580,8 @@ def cmd_intent(args) -> int:
         requires_confirmation=args.confirm,
         title=args.title,
         doc=_read_doc_arg(args),
+        kind=args.kind,
+        data=parse_data_pairs(args.data),
     )
     print(intent["id"])
     if args.json:
@@ -1598,6 +1721,7 @@ def cmd_done(args) -> int:
     # atomic fact-create + conclude (no orphan if intent already done — review H1)
     fact, intent = store.conclude_with_new_fact(
         args.id, args.fact, args.worker, title=args.title, doc=_read_doc_arg(args),
+        kind=args.kind, data=parse_data_pairs(args.data),
     )
     print(f"{args.id} -> {fact['id']}  ({intent['status']})")
     return 0
@@ -1940,11 +2064,11 @@ def _dispatch_explore(store, templates_dir, intent, model, timeout, skip, cwd, a
     )
     text = envelope.get("result", "")
     payload = extract_json_object(text)
-    title, desc, doc = _parse_explore_payload(payload)
+    title, desc, doc, kind, fdata = _parse_explore_payload(payload)
     # record the produced fact AND link the intent atomically — no orphan fact
     # if a concurrent executor already concluded this intent (review C1/H1).
     fact, intent = store.conclude_with_new_fact(
-        intent["id"], desc, worker, title=title, doc=doc,
+        intent["id"], desc, worker, title=title, doc=doc, kind=kind, data=fdata,
     )
     print(f"[explore] {intent['id']} -> {fact['id']}: {desc}")
     return 0
@@ -2251,8 +2375,11 @@ def _apply_reason(store: Store, kind: str, data) -> str:
     return "unknown"
 
 
-def _parse_explore_payload(payload: dict) -> tuple[str | None, str, str | None]:
-    """Return (title, description, doc). title and doc may be None."""
+def _parse_explore_payload(payload: dict) -> tuple[str | None, str, str | None, str | None, dict]:
+    """Return (title, description, doc, kind, data). title/doc/kind may be
+    None; data is a (possibly empty) dict. The produced fact's typed fields
+    come from the payload's `kind` and `fields` keys — `fields`, not `data`,
+    because the payload already uses `data` as the result-envelope wrapper."""
     if payload.get("accepted") is False:
         raise FGError(f"executor rejected: {payload.get('reason','')}")
     data = payload.get("data") if isinstance(payload.get("data"), dict) else payload
@@ -2265,6 +2392,8 @@ def _parse_explore_payload(payload: dict) -> tuple[str | None, str, str | None]:
     title = title.strip() if isinstance(title, str) and title.strip() else None
     doc = data.get("doc")
     doc = doc.strip() if isinstance(doc, str) and doc.strip() else None
+    kind = data.get("kind") if isinstance(data.get("kind"), str) and data.get("kind").strip() else None
+    fields = data.get("fields") if isinstance(data.get("fields"), dict) else {}
     deviations = data.get("deviations")
     if isinstance(deviations, list) and deviations:
         lines = ["\n\n## Deviations\n"]
@@ -2276,7 +2405,7 @@ def _parse_explore_payload(payload: dict) -> tuple[str | None, str, str | None]:
                 lines.append(f"- **Planned:** {planned} → **Actual:** {actual} — *Reason:* {reason}")
         if len(lines) > 1:
             doc = (doc or "") + "\n".join(lines)
-    return title, desc.strip(), doc
+    return title, desc.strip(), doc, kind, fields
 
 
 def _parse_verify_payload(payload: dict) -> tuple[bool, str]:
@@ -2805,9 +2934,11 @@ def _run_explore_raw(store, templates_dir, intent, model, timeout, skip, cwd, cl
         append_system=_agents_system_prompt(store), cwd=cwd,
     )
     payload = extract_json_object(envelope.get("result", ""))
-    title, desc, doc = _parse_explore_payload(payload)
+    title, desc, doc, kind, fdata = _parse_explore_payload(payload)
     # atomic fact-create + conclude: no orphan if a concurrent executor won (C1/H1)
-    fact, _ = store.conclude_with_new_fact(intent["id"], desc, worker, title=title, doc=doc)
+    fact, _ = store.conclude_with_new_fact(
+        intent["id"], desc, worker, title=title, doc=doc, kind=kind, data=fdata,
+    )
     return fact
 
 
@@ -3194,6 +3325,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("graph", help="dump the graph")
     sp.add_argument("--format", choices=["text", "json"], default="text")
+    sp.add_argument("--kind", "-k", default=None, help="only nodes of this kind")
     sp.set_defaults(func=cmd_graph)
 
     sp = sub.add_parser(
@@ -3203,6 +3335,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_validate)
 
     sp = sub.add_parser("frontier", help="open intents ready to work")
+    sp.add_argument("--kind", "-k", default=None, help="only ready intents of this kind")
     sp.set_defaults(func=cmd_frontier)
 
     sp = sub.add_parser("pick", help="pick the next intent to work (prints id)")
@@ -3214,6 +3347,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("fact", help="add a confirmed fact")
     sp.add_argument("description", help="summary (one sentence) — the gist of this node")
+    sp.add_argument("--kind", "-k", default=None,
+                    help="domain type of this fact (free-form slug, e.g. host, indicator); default 'note'")
+    sp.add_argument("--data", "-d", action="append", metavar="KEY=VALUE", default=None,
+                    help="structured attribute (repeatable), e.g. -d type=ip -d value=1.2.3.4")
     sp.add_argument("--title", "-t", default=None,
                     help="short human title shown in the graph view (中文标题)")
     sp.add_argument("--doc", default=None,
@@ -3228,6 +3365,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("intent", help="add an intent (a unit of work)")
     sp.add_argument("--from", dest="from_", required=True, help="comma/space separated fact ids")
     sp.add_argument("description", help="summary (one sentence) — what this intent will do")
+    sp.add_argument("--kind", "-k", default=None,
+                    help="domain type of this intent (free-form slug); default 'note'")
+    sp.add_argument("--data", "-d", action="append", metavar="KEY=VALUE", default=None,
+                    help="structured attribute (repeatable), e.g. -d target=web-01")
     sp.add_argument("--title", "-t", default=None,
                     help="short human title shown in the graph view (中文标题)")
     sp.add_argument("--doc", default=None,
@@ -3355,6 +3496,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("done", help="conclude an intent with a produced fact")
     sp.add_argument("id")
     sp.add_argument("--fact", required=True, help="the confirmed result text (summary)")
+    sp.add_argument("--kind", "-k", default=None,
+                    help="domain type of the produced fact (free-form slug); default 'note'")
+    sp.add_argument("--data", "-d", action="append", metavar="KEY=VALUE", default=None,
+                    help="structured attribute of the produced fact (repeatable)")
     sp.add_argument("--title", "-t", default=None,
                     help="short human title shown in the graph view (中文标题)")
     sp.add_argument("--doc", default=None,

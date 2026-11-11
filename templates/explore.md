@@ -25,7 +25,9 @@ fgc recall "<task gist>"       # FIRST: prior facts/intents similar to this work
 fgc show fact <id>             # full node detail incl. title/description/doc
 fgc doc <id>                   # read the detailed doc of a fact/intent (READ THIS when you need depth)
 fgc fact "<observation>"       # record something you just confirmed
+fgc fact "<obs>" -k <kind> -d key=value  # a TYPED fact (kind + structured data)
 fgc done <intent-id> --fact "<result>"   # finish THIS intent with a fact
+fgc done <id> --fact "<result>" -k <kind> -d key=value   # typed result
 fgc hint "<note>"              # leave a note for the commander / human
 ```
 
@@ -48,8 +50,15 @@ Reject only when execution is clearly inappropriate:
 
 Normal return — the incremental fact this intent produced:
 ```json
-{"accepted": true, "data": {"title": "中间件已修复", "description": "one-sentence gist of what you confirmed", "doc": "optional detailed markdown: exact commands run, output, changed files, evidence", "deviations": [{"planned": "...", "actual": "...", "reason": "..."}]}}
+{"accepted": true, "data": {"title": "中间件已修复", "description": "one-sentence gist of what you confirmed", "kind": "finding", "fields": {"severity": "high", "host": "web-01"}, "doc": "optional detailed markdown: exact commands run, output, changed files, evidence", "deviations": [{"planned": "...", "actual": "...", "reason": "..."}]}}
 ```
+
+The `kind` and `fields` are OPTIONAL typed-fact metadata. `kind` is a short
+domain type for this fact (your domain's taxonomy — e.g. `indicator`, `host`,
+`finding`); omit it and the fact stores as the default `note`. `fields` is a
+flat object of `key: value` strings carrying the fact's structured attributes
+(it is named `fields`, not `data`, because `data` is this envelope's wrapper).
+Use them when the fact has a type and attributes worth counting or correlating.
 
 The `deviations` field is optional. If you deviated from the intent's original plan during execution, record each deviation. This helps future agents understand why the approach changed. Omit the field entirely if you followed the plan as stated.
 
