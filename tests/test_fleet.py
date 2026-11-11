@@ -40,9 +40,9 @@ class FleetModelTests(unittest.TestCase):
         self.assertEqual(fleet.Fleet(self.root).units(), [])
 
     def test_board_counts_reflect_graph(self):
-        u = _init_unit(self.root, "u01", "triage alert")
-        seed = u.store.add_fact("web-01 has the alerted process", "test", None)
-        u.store.add_intent([seed["id"]], "pull auth logs", "test")
+        u = _init_unit(self.root, "u01", "evaluate caching libraries")
+        seed = u.store.add_fact("libfoo documents an async API", "test", None)
+        u.store.add_intent([seed["id"]], "benchmark libfoo", "test")
         board = fleet.Fleet(self.root).board("60m")
         self.assertEqual(board["budget_left"], "60m")
         row = board["units"][0]
@@ -53,11 +53,11 @@ class FleetModelTests(unittest.TestCase):
         self.assertFalse(row["completed"])
 
     def test_render_board_includes_units_and_budget(self):
-        _init_unit(self.root, "u01", "triage alert on web-01")
+        _init_unit(self.root, "u01", "evaluate caching libraries")
         text = fleet.Fleet(self.root).render_board("30m")
         self.assertIn("budget_left: 30m", text)
         self.assertIn("u01", text)
-        self.assertIn("triage alert on web-01", text)
+        self.assertIn("evaluate caching libraries", text)
 
     def test_state_roundtrip(self):
         f = fleet.Fleet(self.root)
@@ -101,8 +101,8 @@ class CommandStepTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = Path(self.tmp.name) / ".fleet"
-        _init_unit(self.root, "u01", "triage alert")
-        _init_unit(self.root, "u02", "reconstruct timeline")
+        _init_unit(self.root, "u01", "evaluate caching libraries")
+        _init_unit(self.root, "u02", "evaluate logging libraries")
         self.fleet = fleet.Fleet(self.root)
 
     def tearDown(self):

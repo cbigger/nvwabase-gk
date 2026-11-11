@@ -3,9 +3,8 @@
 
 Distinct from the fact graph. The GRAPH is live per-run working memory (facts a
 run produces). The KB is static reference the workers *look things up in* —
-checklists, methods, playbooks for the domain. The engine here is
-domain-agnostic; its *contents* are the domain part, so nvwabase ships it with a
-couple of neutral incident-response examples and you add your own.
+checklists, methods, playbooks. The engine here is domain-agnostic; its
+*contents* are the domain part. The base ships the KB empty; you add your own.
 
 Storage: one JSON file per entry under ``<kb>/entries/<id>.json``:
     {"id": "...", "title": "...", "tags": ["..."], "body": "..."}

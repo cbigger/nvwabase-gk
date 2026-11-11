@@ -397,13 +397,13 @@ class TypedFactsTests(unittest.TestCase):
 
     def test_fact_stores_kind_and_data(self):
         f = self.store.add_fact(
-            "c2 domain confirmed", creator="user", source_intent=None,
-            kind="indicator", data={"type": "domain", "value": "evil.example"},
+            "libfoo documents an async API", creator="user", source_intent=None,
+            kind="source", data={"name": "libfoo", "url": "example.com/libfoo"},
         )
-        self.assertEqual(f["kind"], "indicator")
-        self.assertEqual(f["data"], {"type": "domain", "value": "evil.example"})
+        self.assertEqual(f["kind"], "source")
+        self.assertEqual(f["data"], {"name": "libfoo", "url": "example.com/libfoo"})
         # round-trips through disk
-        self.assertEqual(self.store.get_fact(f["id"])["kind"], "indicator")
+        self.assertEqual(self.store.get_fact(f["id"])["kind"], "source")
 
     def test_untyped_fact_defaults_to_note_with_empty_data(self):
         f = self.store.add_fact("plain obs", creator="user", source_intent=None)
@@ -434,20 +434,20 @@ class TypedFactsTests(unittest.TestCase):
 
     def test_done_produces_typed_fact(self):
         f0 = self.store.add_fact("seed", creator="user", source_intent=None)
-        i = self.store.add_intent([f0["id"]], "isolate host", creator="user")
+        i = self.store.add_intent([f0["id"]], "benchmark libfoo", creator="user")
         fact, intent = self.store.conclude_with_new_fact(
-            i["id"], "host isolated", "worker",
-            kind="finding", data={"host": "web-01"},
+            i["id"], "libfoo is fastest", "worker",
+            kind="finding", data={"winner": "libfoo"},
         )
         self.assertEqual(fact["kind"], "finding")
-        self.assertEqual(fact["data"], {"host": "web-01"})
+        self.assertEqual(fact["data"], {"winner": "libfoo"})
         self.assertEqual(intent["status"], "done")
 
     def test_intent_stores_kind(self):
         f0 = self.store.add_fact("seed", creator="user", source_intent=None)
-        i = self.store.add_intent([f0["id"]], "propose containment", creator="user",
-                                  kind="containment")
-        self.assertEqual(self.store.get_intent(i["id"])["kind"], "containment")
+        i = self.store.add_intent([f0["id"]], "adopt libfoo", creator="user",
+                                  kind="decision")
+        self.assertEqual(self.store.get_intent(i["id"])["kind"], "decision")
 
     def test_preexisting_kindless_node_loads_and_defaults(self):
         # a node written before typed facts (no kind/data) must still load
@@ -462,19 +462,19 @@ class TypedFactsTests(unittest.TestCase):
         self.assertEqual(fg.validate_graph(self.store), [])
 
     def test_graph_shows_kind_tag_only_for_typed_nodes(self):
-        self.store.add_fact("typed", creator="user", source_intent=None, kind="host")
+        self.store.add_fact("typed", creator="user", source_intent=None, kind="source")
         self.store.add_fact("plain", creator="user", source_intent=None)
         text = fg.render_graph_text(self.store)
-        self.assertIn("<host>", text)
+        self.assertIn("<source>", text)
         self.assertNotIn("<note>", text)  # default kind stays invisible
 
     def test_explore_payload_carries_kind_and_fields(self):
         payload = {"accepted": True, "data": {
-            "description": "beaconing confirmed", "kind": "indicator",
-            "fields": {"type": "ip", "value": "1.2.3.4"}}}
+            "description": "libfoo is fastest", "kind": "finding",
+            "fields": {"metric": "p99", "value": "12ms"}}}
         title, desc, doc, kind, data = fg._parse_explore_payload(payload)
-        self.assertEqual(kind, "indicator")
-        self.assertEqual(data, {"type": "ip", "value": "1.2.3.4"})
+        self.assertEqual(kind, "finding")
+        self.assertEqual(data, {"metric": "p99", "value": "12ms"})
 
     def test_explore_payload_without_typed_fields(self):
         payload = {"accepted": True, "data": {"description": "plain result"}}

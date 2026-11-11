@@ -1,6 +1,0 @@
-{
-  "id": "timeline-reconstruction",
-  "title": "Timeline reconstruction method",
-  "tags": ["incident-response", "timeline", "forensics", "correlation"],
-  "body": "Reconstruct what happened, in order, from evidence:\n\n1. Anchor on a known event (the alert, a confirmed malicious login, a file write) and its timestamp. Record it as a timeline fact with ts/actor/action/evidence_ref.\n2. Work outward in both directions: what happened just before (initial access, the preceding auth) and just after (what the actor did next).\n3. One source of truth per claim: cite the exact log line or artifact in evidence_ref. A timeline entry with no cited evidence is a hypothesis, not a fact.\n4. Normalize clocks: note each source's timezone; convert to one reference zone before ordering.\n5. On every newly confirmed foothold (a compromised account or host), re-enumerate: it is new surface, and the next event usually hides one hop past the last.\n6. Stop when the story is continuous from initial access to current state, or when a gap needs evidence you must go collect.\n\nThe output is an ordered set of timeline facts plus findings that cite them."
-}
