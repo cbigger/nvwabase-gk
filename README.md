@@ -2,8 +2,8 @@
 
 A rebuilt version of [nvwabase](https://github.com/N1nEmAn/nvwabase) that
 incorporates some lessons from [sapper-v2](https://github.com/N1nEmAn/sapper-v2):
-a generalized commander doctrine, model tiering, a multi-graph commander, a
-knowledge base, and typed facts.
+a generalized commander doctrine, model tiering, multi-graph fleet
+orchestration, a knowledge base, and typed facts.
 
 A shared **fact-intent graph** for long-horizon, multi-agent work, plus a thin
 orchestration layer that runs many agents and many graphs at once. Pure Python
@@ -17,8 +17,9 @@ individual agent sessions can end while the graph — and the work — persists.
 
 This fork generalizes the proven *design* of an autonomous multi-agent harness
 into a domain-neutral base and builds three things on top of the graph engine:
-a **commander doctrine**, **model tiering**, and a **multi-graph commander**.
-It is general: give it goals and it drives a team of agents to them. Any
+a **commander doctrine**, **model tiering**, and **multi-graph fleet
+orchestration**. It is general: give it goals and it drives a team of agents to
+them. Any
 long-horizon task that decomposes into units with checkable results fits —
 research, analysis, code work, document production.
 
@@ -29,8 +30,8 @@ research, analysis, code work, document production.
   through the `claude` CLI, drive one graph to its goal with `auto`, search
   prior work with `recall`, and render an interactive HTML DAG with `view`.
 - **`nvwa`** — orchestration: spawn/‌message/‌read AI agents (one per tmux pane),
-  a cross-graph board, and the multi-graph commander. Every `fgc` command
-  passes through `nvwa` transparently.
+  a cross-graph board, and fleet allocation across many graphs. Every `fgc`
+  command passes through `nvwa` transparently.
 
 ## What's inside
 
@@ -52,13 +53,14 @@ research, analysis, code work, document production.
 - **Model tiering** — a role→tier→model map (`FG_TIERS`): a strong model for the
   commander and hard/high-stakes steps, a cheap model for the worker mass, with
   a strong-concurrency cap. Degrades to a single model when unconfigured.
-  See [doctrine/commander-doctrine.md](doctrine/commander-doctrine.md) Part B.
-- **Multi-graph commander** — a **fleet** is a directory of per-unit graphs.
-  `nvwa command` runs one LLM allocation step across the board (work/hire/fire/
-  stop), `nvwa sweep` round-robins a slice over open units, and
-  `fleet up`/`down` manage the formation. `fleet command --loop` plus
-  `watchdog.sh` keep a commander alive to a deadline, resuming from a persisted
-  state file (doctrine §5).
+  See [doctrine/commander-doctrine.md](doctrine/commander-doctrine.md) §5.
+- **Multi-graph fleet** — a **fleet** is a directory of per-unit graphs.
+  `nvwa command` runs one allocation step across the board (work/hire/fire/stop),
+  `nvwa sweep` round-robins an `auto` slice over open units, and
+  `nvwa fleet up`/`down` manage the workers. That allocation step is a single
+  scripted decision, not the agentic commander of the doctrine above;
+  `watchdog.sh` can keep the `nvwa command --loop` allocation loop alive to a
+  deadline, resuming from a persisted state file.
 - **Knowledge base** — `fgc kb search|list|show|add`: a static reference shelf
   the workers look things up in, distinct from the live graph.
 - **Concurrency-safe** — one JSON file per node, flock + atomic writes; many
@@ -73,7 +75,7 @@ bash install.sh      # installs fgc + nvwa (stdlib only, zero deps)
 
 Then follow [docs/quickstart.md](docs/quickstart.md), which walks a single
 graph through setup → fact → intent → auto, then scales up to a multi-graph
-fleet with the commander. Drive it with your own Claude Code: `fgc`/`nvwa`
+fleet. Drive it with your own Claude Code: `fgc`/`nvwa`
 default to the `claude` CLI and your Anthropic account; the full multi-agent
 path also needs `tmux`.
 

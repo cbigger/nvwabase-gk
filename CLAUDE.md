@@ -35,3 +35,16 @@ Rules that follow from this, for anyone (human or agent) working on this repo:
 5. **If unsure whether something belongs in the base:** ask "does this make sense
    for a user who has never heard of any example domain?" If no, it belongs in a
    specialization, not the base.
+
+6. **Everything ships in working order, never as an abstraction waiting to be
+   authored.** No shipped file may contain angle-bracket placeholders
+   (`<FILL ME IN>`), "copy this file and fill the slots" template framing, or any
+   reference to the port, its phases, or this development process. A doctrine,
+   skill, or doc is the real thing a user runs with, filled in with working
+   defaults — not a form for them to complete. If a file reads like a template or
+   mentions "Phase N", it is a bug; rewrite it concrete.
+
+7. **Docs must match the code.** Documentation that describes behavior the code
+   does not have is a defect, not a roadmap. In particular, do not call the
+   scripted `nvwa fleet command` allocator "the commander" — the commander is the
+   agentic Claude Code session that follows `doctrine/commander-doctrine.md`.

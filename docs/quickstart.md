@@ -91,26 +91,26 @@ A **fleet** is a directory of per-unit graphs — one goal per unit. Create a
 couple and watch the board:
 
 ```bash
-fleet init u01 --goal "evaluate caching libraries and recommend one"
-fleet init u02 --goal "evaluate logging libraries and recommend one"
-fleet status --budget 60m      # cross-graph board: status / facts / open / ready / worker
+nvwa fleet init u01 --goal "evaluate caching libraries and recommend one"
+nvwa fleet init u02 --goal "evaluate logging libraries and recommend one"
+nvwa fleet status --budget 60m   # cross-graph board: status / facts / open / ready / worker
 ```
 
-Advance them. `sweep` is a no-LLM round-robin; `command` is one LLM allocation
-step that decides which unit to work/hire/fire next:
+Advance them. `sweep` is a no-LLM round-robin; `command` is one scripted
+allocation step that decides which unit to work/hire/fire next:
 
 ```bash
-fleet sweep --rounds 2                       # one auto slice over each open unit
-fleet command --budget 60m                    # commander (strong tier) allocates the next slice
-fleet up                                      # hire a worker on each open unit (needs tmux + claude)
-fleet down                                     # stop all fleet workers
+nvwa fleet sweep --rounds 2        # one auto slice over each open unit
+nvwa fleet command --budget 60m    # the allocator picks the next slice (strong tier)
+nvwa fleet up                      # hire a worker on each open unit (needs tmux + claude)
+nvwa fleet down                    # stop all fleet workers
 ```
 
-(`nvwa fleet …`, `nvwa command …`, `nvwa sweep …` route to the same thing.)
+## 5. Run the allocator unattended
 
-## 5. Run it unattended
-
-`fleet command --loop` is the commander's tempo loop; `watchdog.sh` keeps it
+`nvwa fleet command --loop` is the fleet's scripted allocation loop — not the
+agentic commander of [the doctrine](../doctrine/commander-doctrine.md), but a
+simple work/hire/fire/stop decision repeated on a timer. `watchdog.sh` keeps it
 alive to a deadline and relaunches it from its persisted state if it dies:
 
 ```bash
