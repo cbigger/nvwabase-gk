@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# install.sh — install the `fgc` + `nvwa` CLIs and the `fgc-setup` project skill.
+# install.sh — install the `fgc` + `nvwa` CLIs and the `nvwabase` project skill.
 #
 # This installer does NOT touch ~/.claude/settings.json and does NOT register
 # any global hooks. The fact-graph is strictly per-project opt-in: you opt a
-# project in by running `fgc setup` (or the /fgc-setup skill) inside that
+# project in by running `fgc setup` (or the /nvwabase skill) inside that
 # project, which writes ./.claude/settings.json + .fg/ there.
 #
 # Usage:
@@ -27,9 +27,9 @@ fi
 if [[ "$mode" == "--uninstall" ]]; then
   rm -f "${HOME}/.local/bin/fgc" "${HOME}/.local/bin/nvwa"
   echo "removed ~/.local/bin/fgc, ~/.local/bin/nvwa"
-  if [[ -e "${HOME}/.claude/skills/fgc-setup" || -L "${HOME}/.claude/skills/fgc-setup" ]]; then
-    rm -f "${HOME}/.claude/skills/fgc-setup"
-    echo "removed ~/.claude/skills/fgc-setup"
+  if [[ -e "${HOME}/.claude/skills/nvwabase" || -L "${HOME}/.claude/skills/nvwabase" ]]; then
+    rm -f "${HOME}/.claude/skills/nvwabase"
+    echo "removed ~/.claude/skills/nvwabase"
   fi
   echo "uninstalled."
   echo "(Project-level .fg/ graphs and ./.claude/settings.json in your projects are untouched."
@@ -72,19 +72,19 @@ esac
 "$DEST_DIR/fgc" --version >/dev/null && echo "  (fgc works)"
 
 if [[ "$mode" == "--cli-only" ]]; then
-  echo "(--cli-only: skipping the /fgc-setup skill)"
+  echo "(--cli-only: skipping the /nvwabase skill)"
   exit 0
 fi
 
 # --- install the project skill --------------------------------------------
 SKILLS_DIR="${HOME}/.claude/skills"
 mkdir -p "$SKILLS_DIR"
-SKILL_LINK="$SKILLS_DIR/fgc-setup"
+SKILL_LINK="$SKILLS_DIR/nvwabase"
 if [[ -e "$SKILL_LINK" || -L "$SKILL_LINK" ]]; then
   rm -f "$SKILL_LINK"
 fi
 ln -s "${SCRIPT_DIR}/skill" "$SKILL_LINK"
-echo "installed: /fgc-setup skill -> $SKILL_LINK"
+echo "installed: /nvwabase skill -> $SKILL_LINK"
 
 cat <<'NOTE'
 
@@ -95,7 +95,7 @@ To opt a project IN (run inside the project dir):
   #  ↑ creates ./.fg/  +  registers hooks in ./.claude/settings.json  +  AGENTS.md
 
 Or just invoke the skill from inside Claude Code:
-  /fgc-setup <your goal>
+  /nvwabase <your goal>
 
 After that, every turn in that project auto-injects the current graph state,
 and you can drive it with `fgc dispatch reason` / `fgc auto`.

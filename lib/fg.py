@@ -11,7 +11,7 @@ State is encoded in graph structure, not in a state machine. Storage is one
 JSON file per node (git-diffable) under a project-local `.fg/` directory,
 guarded by fcntl.flock so multiple agents can touch it concurrently.
 
-Pure stdlib. See `fgc --help` and SKILL.md.
+Pure stdlib. See `fgc --help` and skill/SKILL.md.
 """
 from __future__ import annotations
 

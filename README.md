@@ -84,7 +84,7 @@ path also needs `tmux`.
 - [docs/quickstart.md](docs/quickstart.md) — end-to-end walkthrough.
 - [doctrine/commander-doctrine.md](doctrine/commander-doctrine.md) — the commander standing orders + model tiering.
 - [doctrine/state-and-watchdog.md](doctrine/state-and-watchdog.md) — the state file + watchdog mechanism.
-- [SKILL.md](SKILL.md) — the full `fgc` command reference.
+- [skill/SKILL.md](skill/SKILL.md) — the installed skill and the full `fgc` + `nvwa` command reference.
 
 ## Credits
 
