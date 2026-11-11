@@ -1,8 +1,8 @@
 # Quickstart
 
-A walkthrough from one graph to a multi-graph fleet, using a defensive
-incident-response task as the running example. Everything runs on your own
-Claude Code and Anthropic account.
+A walkthrough from one graph to a multi-graph fleet, using a library-evaluation
+task as the running example. Everything runs on your own Claude Code and
+Anthropic account.
 
 ## 0. Install
 
@@ -16,10 +16,10 @@ graph needs only `claude`.
 
 ## 1. A single graph
 
-Create a graph for one incident and inspect it:
+Create a graph for one goal and inspect it:
 
 ```bash
-fgc init --goal "triage the alert on host web-01"
+fgc init --goal "evaluate candidate caching libraries and recommend one"
 fgc status                     # project + the ready-to-work frontier
 ```
 
@@ -27,23 +27,24 @@ Record a confirmed observation (a **fact**), then a **unit of work** (an
 **intent**) that depends on it:
 
 ```bash
-fgc fact "web-01 is running the alerted process" --title "process confirmed" \
-    -k host -d hostname=web-01 -d status=suspect
+fgc fact "libfoo documents an async API and a 10k-star repo" --title "libfoo overview" \
+    -k source -d name=libfoo -d url=example.com/libfoo
 #   -> f001
-fgc intent --from f001 "pull auth logs for web-01 around the alert time"
+fgc intent --from f001 "benchmark libfoo throughput against the baseline"
 #   -> i001
 fgc graph                      # facts + intents (kinds shown inline)
-fgc graph -k host              # only facts/intents of kind 'host'
+fgc graph -k source            # only facts/intents of kind 'source'
 fgc frontier                   # intents ready to work
 ```
 
 Facts carry a one-line description plus an optional `--title` and `--doc`
 (or `--doc-file`). A fact can also be **typed**: `-k <kind>` tags it with a
-free-form domain type and `-d key=value` (repeatable) attaches structured
-attributes, which the commander can count and filter on (`fgc graph -k host`).
+free-form type and `-d key=value` (repeatable) attaches structured
+attributes, which the commander can count and filter on (`fgc graph -k source`).
 Kinds are arbitrary strings — the engine never enumerates them — and an untyped
-fact defaults to the kind `note`. `fgc done` and `fgc intent` take the same
-`-k`/`-d`. Intents depend on one or more fact ids via `--from` (the special
+fact defaults to the kind `note`. The neutral default vocabulary is `source`,
+`finding`, `artifact`, `decision`, and `risk`; a specialized deployment can
+define its own. `fgc done` and `fgc intent` take the same `-k`/`-d`. Intents depend on one or more fact ids via `--from` (the special
 `goal` fact can't be a dependency — seed a fact first, as above). Use
 `--confirm` on an intent that must not run without human sign-off.
 
@@ -86,12 +87,12 @@ model — tiering is opt-in.
 
 ## 4. Many graphs: a fleet
 
-A **fleet** is a directory of per-unit graphs — one incident per unit. Create a
+A **fleet** is a directory of per-unit graphs — one goal per unit. Create a
 couple and watch the board:
 
 ```bash
-fleet init u01 --goal "triage alert on host web-01"
-fleet init u02 --goal "reconstruct the timeline for account svc-deploy"
+fleet init u01 --goal "evaluate caching libraries and recommend one"
+fleet init u02 --goal "evaluate logging libraries and recommend one"
 fleet status --budget 60m      # cross-graph board: status / facts / open / ready / worker
 ```
 
@@ -123,13 +124,12 @@ See [doctrine/state-and-watchdog.md](../doctrine/state-and-watchdog.md).
 A static reference shelf the workers consult (distinct from the live graph):
 
 ```bash
-fgc kb search "triage alert"
-fgc kb show ir-triage-checklist
-fgc kb add --title "Containment playbook" --tags "containment,ir" --body "isolate, preserve, eradicate"
+fgc kb search "<keywords>"
+fgc kb list
+fgc kb add --title "Benchmark method" --tags "method,perf" --body "warm up, measure p50/p99, repeat 5x"
 ```
 
 ## Where next
 
-- [docs/ir-platform.md](ir-platform.md) — the incident-response domain in depth.
 - [doctrine/commander-doctrine.md](../doctrine/commander-doctrine.md) — how a commander should allocate and escalate.
 - [SKILL.md](../SKILL.md) — the full `fgc` command reference.

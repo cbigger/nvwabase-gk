@@ -13,8 +13,9 @@ individual agent sessions can end while the graph — and the work — persists.
 This fork generalizes the proven *design* of an autonomous multi-agent harness
 into a domain-neutral base and builds three things on top of the graph engine:
 a **commander doctrine**, **model tiering**, and a **multi-graph commander**.
-The first worked domain is defensive **incident response** — see
-[docs/ir-platform.md](docs/ir-platform.md).
+It is general: give it goals and it drives a team of agents to them. Any
+long-horizon task that decomposes into units with checkable results fits —
+research, analysis, code work, document production.
 
 ## The two CLIs
 
@@ -32,12 +33,14 @@ The first worked domain is defensive **incident response** — see
   optional detailed doc; prompts get the summary layer, depth is opt-in via
   `fgc doc <id>`, so context stays lean.
 - **Typed facts, neutral mechanism** — `fgc fact "<obs>" -k <kind> -d key=value`
-  records a node with an optional domain `kind` (a free-form slug) and a bag of
+  records a node with an optional `kind` (a free-form slug) and a bag of
   `key=value` attributes, so the commander can count and correlate on them
-  (`fgc graph -k indicator`). The engine never enumerates kinds — it stores
-  arbitrary strings; a domain's doctrine supplies the vocabulary (incident
-  response uses `alert`, `indicator`, `host`, `account`, `timeline`, `finding`,
-  `containment`). Untyped facts default to `note`, so the feature is opt-in.
+  (`fgc graph -k finding`). The engine never enumerates kinds — it stores
+  arbitrary strings. The neutral default vocabulary is `source` (an input
+  consulted), `finding` (a confirmed conclusion), `artifact` (something
+  produced), `decision` (a choice, gated with `--confirm` when risky), and
+  `risk` (a hazard or blocker); untyped facts default to `note`. A specialized
+  deployment can define its own kinds instead. The feature is opt-in.
 - **Sub-agent dispatch** — `fgc dispatch reason|explore|verify|brainstorm|blindspot`:
   a commander proposes, executors work, verifiers check; every conclusion is
   written back into the graph. `fgc auto` runs the loop to the goal or budget.
@@ -72,9 +75,7 @@ path also needs `tmux`.
 ## Documentation
 
 - [docs/quickstart.md](docs/quickstart.md) — end-to-end walkthrough.
-- [docs/ir-platform.md](docs/ir-platform.md) — using nvwabase-gk as an incident-response platform.
-- [doctrine/commander-doctrine.md](doctrine/commander-doctrine.md) — the neutral commander standing orders + model tiering (fill-in template).
-- [doctrine/incident-response.md](doctrine/incident-response.md) — the IR instantiation of the doctrine.
+- [doctrine/commander-doctrine.md](doctrine/commander-doctrine.md) — the commander standing orders + model tiering.
 - [doctrine/state-and-watchdog.md](doctrine/state-and-watchdog.md) — the state file + watchdog mechanism.
 - [SKILL.md](SKILL.md) — the full `fgc` command reference.
 
