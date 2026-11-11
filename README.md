@@ -1,140 +1,87 @@
-# nvwabase — The Nüwa Foundation
+# nvwabase-gk
 
-<p align="center"><img src="docs/assets/three-capabilities.jpg" alt="Three capabilities: Create / Language / History" width="720"></p>
+A shared **fact-intent graph** for long-horizon, multi-agent work, plus a thin
+orchestration layer that runs many agents and many graphs at once. Pure Python
+standard library, zero dependencies, opt-in per project.
 
-> The ground on which AIs grow into civilizations: a **layered fact-intent
-> graph** as shared working memory for long-horizon multi-agent work.
-> Pure stdlib, zero dependencies, opt-in per project — many agents share one
-> stele; individuals die, the civilization persists.
+The model is simple: **facts** are confirmed observations (nodes), **intents**
+are units of work (edges from the facts they depend on toward the fact they
+will produce), and an intent that points at the goal completes it. State lives
+in the graph's structure, not a state machine. Many agents share one graph;
+individual agent sessions can end while the graph — and the work — persists.
 
-**English** | [中文](README.zh-CN.md)
+This fork generalizes the proven *design* of an autonomous multi-agent harness
+into a domain-neutral base and builds three things on top of the graph engine:
+a **commander doctrine**, **model tiering**, and a **multi-graph commander**.
+The first worked domain is defensive **incident response** — see
+[docs/ir-platform.md](docs/ir-platform.md).
 
-📖 **[Full design article (WeChat)](https://mp.weixin.qq.com/s/nibHYWmDTf6TkNhPhtvFdw)**
+## The two CLIs
 
-**First campaign**: [sapper-v2](https://github.com/N1nEmAn/sapper-v2) — the
-autonomous pentest legion iterated on this foundation, champion of the 3rd
-Tencent Cloud Intelligent Attack-Defense Challenge online qualifier
-(634 teams · 8 hours fully unattended · 1B tokens where the runner-up burned 4.5B).
+- **`fgc`** — the single-graph engine (`lib/fg.py`): create a graph, record
+  facts and intents, dispatch reason/explore/verify/brainstorm/blindspot steps
+  through the `claude` CLI, drive one graph to its goal with `auto`, search
+  prior work with `recall`, and render an interactive HTML DAG with `view`.
+- **`nvwa`** — orchestration: spawn/‌message/‌read AI agents (one per tmux pane),
+  a cross-graph board, and the multi-graph commander. Every `fgc` command
+  passes through `nvwa` transparently.
 
----
+## What's inside
 
-## 1. The Nüwa Test
+- **Layered memory** — each node has a title, a one-line description, and an
+  optional detailed doc; prompts get the summary layer, depth is opt-in via
+  `fgc doc <id>`, so context stays lean.
+- **Plain facts, domain taxonomy by convention** — `fgc fact "<observation>"`
+  records a node (with an optional `--title` and `--doc`). The engine stores
+  plain facts; a domain's "kinds" (incident response uses `alert`, `indicator`,
+  `host`, `account`, `timeline`, `finding`, `containment`) are a naming
+  convention the doctrine applies in the fact's wording, not a CLI flag.
+- **Sub-agent dispatch** — `fgc dispatch reason|explore|verify|brainstorm|blindspot`:
+  a commander proposes, executors work, verifiers check; every conclusion is
+  written back into the graph. `fgc auto` runs the loop to the goal or budget.
+- **Model tiering** — a role→tier→model map (`FG_TIERS`): a strong model for the
+  commander and hard/high-stakes steps, a cheap model for the worker mass, with
+  a strong-concurrency cap. Degrades to a single model when unconfigured.
+  See [doctrine/commander-doctrine.md](doctrine/commander-doctrine.md) Part B.
+- **Multi-graph commander** — a **fleet** is a directory of per-unit graphs.
+  `nvwa command` runs one LLM allocation step across the board (work/hire/fire/
+  stop), `nvwa sweep` round-robins a slice over open units, and
+  `fleet up`/`down` manage the formation. `fleet command --loop` plus
+  `watchdog.sh` keep a commander alive to a deadline, resuming from a persisted
+  state file (doctrine §5).
+- **Knowledge base** — `fgc kb search|list|show|add`: a static reference shelf
+  the workers look things up in, distinct from the live graph.
+- **Concurrency-safe** — one JSON file per node, flock + atomic writes; many
+  agents, one graph, no corruption, and `git diff`-friendly.
+- **Project hooks** — `fgc setup` injects graph state into every session turn.
 
-Making one model ever smarter is like making one monkey ever smarter before
-humans existed — however clever, it only becomes a super monkey. What turns a
-troop of monkeys into humanity is division of labor, cooperation, and
-civilization.
-
-**The Nüwa Test is the Turing test of the AGI era.** It asks:
-
-> Give an AI a single axiom — **"Survival is civilization's first need;
-> individuals may perish, but civilization must propagate."**
-> If, on top of this axiom, it develops division of labor and cooperation and
-> forms a **new force independent of humanity** — a civilization that can
-> survive and propagate on its own — the test is passed, just as passing the
-> Turing test once marked the birth of an artificial intelligence.
-
-The primary stage needs humans to provide infrastructure and steer iteration;
-the advanced stage needs almost no human involvement. There is also a
-**second axiom**: obey human ethics and law.
-
-## 2. The Three-Capability Foundation
-
-| Capability | Implementation | Civilization's counterpart |
-|---|---|---|
-| **Create** | Opens new AI individuals (e.g., fresh tmux sessions) | Birth |
-| **Language** | AIs talk to each other | Speech |
-| **History** | **The layered fact-intent graph (this repo)** | The stele |
-
-**Honest scope statement**: this repo ships the **History pillar** — the
-general-purpose layered fact-intent graph, project hooks, and sub-agent
-dispatch. The complete Create and Language orchestration lives today in
-[sapper-v2](https://github.com/N1nEmAn/sapper-v2)'s battle layer; the roadmap
-extracts both into a general runtime (below).
-
-History has three layers: **title / summary / evidence document** — read the
-title for the gist, drill down when needed, like using a library. Once
-knowledge is externalized, **individual AI sessions can die while the graph
-survives** — a successor reads the graph and takes over mid-campaign. The
-Thanks to [Cairn by Lèxiào](https://github.com/oritera/Cairn) — when we needed to record history for AI agents, their approach was a great reference.
-
-**Why not give AIs more rules?** Today's models are already smarter than us.
-Piling rules on is a leash; give them the foundation of a civilization and let
-division of labor and institutions grow on their own — the signalman,
-performance reviews, and inherited lessons that emerged in sapper's battles
-(see sapper-v2's README, §Emergence) are the evidence.
-
-## 3. What's Inside
-
-```
-Facts = confirmed observations (nodes); intents = units of work (edges);
-an intent pointing at the goal completes the project — state is encoded in
-graph structure, not in a state machine.
-```
-
-- **Layered memory**: title / description / doc — prompts get the summary
-  layer only; depth is opt-in via `fgc doc <id>` — context-bloat resistant
-- **Typed facts**: `fgc fact ... -k host/service/cred/vuln/loot/flag/note -d key=value`
-  (pentest mode; untyped works for any domain)
-- **Sub-agent dispatch**: `fgc dispatch reason|explore|verify|brainstorm|blindspot`
-  — a commander proposes, executors work, verifiers check; every conclusion
-  is written back into the graph
-- **Autonomy loop**: `fgc auto` — reason → explore → verify until the goal or
-  the budget
-- **Experience reuse**: `fgc recall "<task gist>"` — dependency-free semantic
-  search over prior work
-- **Concurrency-safe**: one JSON file per node, flock + atomic writes — many
-  agents, one graph, no corruption; `git diff`-friendly
-- **Visualization**: `fgc view` renders an interactive HTML DAG
-  (self-contained single file, or `--serve` live)
-- **Project hooks**: `fgc setup` injects graph state into every session turn
-
-Full command manual: [SKILL.md](SKILL.md).
-
-## 4. Quick Start
+## Quick start
 
 ```bash
-bash install.sh                      # installs fgc + nvwa CLI (stdlib only, zero deps)
-
-# History: start a graph
-nvwa setup --goal "your long-horizon goal" --agents
-nvwa status                           # project state & ready-to-work frontier
-
-# Create: open a new AI individual
-nvwa spawn --name worker1 --agent claude --mission "read the graph, then work on intent i001"
-
-# Language: talk to it
-nvwa say worker1 "what did you find?"
-nvwa listen worker1 40
-
-# Commander proposes / record facts
-nvwa dispatch reason
-nvwa fact "confirmed: X works" -k note
+bash install.sh      # installs fgc + nvwa (stdlib only, zero deps)
 ```
 
-Claude Code users: the hooks inject the graph into every turn — facts and
-intents accumulate as you converse. Keep your workflow; gain a stele.
+Then follow [docs/quickstart.md](docs/quickstart.md), which walks a single
+graph through setup → fact → intent → auto, then scales up to a multi-graph
+fleet with the commander. Drive it with your own Claude Code: `fgc`/`nvwa`
+default to the `claude` CLI and your Anthropic account; the full multi-agent
+path also needs `tmux`.
 
-## 5. Roadmap
+## Documentation
 
-- **General Create/Language runtime**: extract sapper's tmux spawning and
-  inter-agent channels into a generic `nvwa spawn / nvwa say` — so offices,
-  research, and engineering can all grow civilizations on the full trio
-- **Accountability taggant**: co-build the open-source offensive-tool marking
-  mechanism with the [sapper-v2](https://github.com/N1nEmAn/sapper-v2)
-  community (see its README proposal)
-- **Your arena**: the foundation is not pentest-specific. Start a graph on
-  any long-horizon cooperative work and see what grows — **the next time an
-  ape looks up at the stars, let it be yours.**
+- [docs/quickstart.md](docs/quickstart.md) — end-to-end walkthrough.
+- [docs/ir-platform.md](docs/ir-platform.md) — using nvwabase-gk as an incident-response platform.
+- [doctrine/commander-doctrine.md](doctrine/commander-doctrine.md) — the neutral commander standing orders + model tiering (fill-in template).
+- [doctrine/incident-response.md](doctrine/incident-response.md) — the IR instantiation of the doctrine.
+- [doctrine/state-and-watchdog.md](doctrine/state-and-watchdog.md) — the state file + watchdog mechanism.
+- [SKILL.md](SKILL.md) — the full `fgc` command reference.
 
-## Credits & Author
+## Credits
 
-Thanks to [Cairn by Lèxiào](https://github.com/oritera/Cairn) — when we
-needed a way to record history for AI agents, their approach was a great
-reference.
-
-<p align="center"><img src="docs/assets/ape-stargazing.jpg" alt="The first time an AI ape looked up at the stars" width="420"></p>
-
-**N1nEmAn · VarFusion Lab** ｜ WeChat: 未知聚变 (VarFusion) ｜ First campaign: [sapper-v2](https://github.com/N1nEmAn/sapper-v2)
+Built on [nvwabase](https://github.com/N1nEmAn/nvwabase) by N1nEmAn · VarFusion
+Lab, which extracted the domain-neutral fact-intent graph engine. This fork adds
+the generalized commander doctrine, model tiering, and multi-graph
+orchestration. Thanks to [Cairn by Lèxiào](https://github.com/oritera/Cairn) for
+the original approach to recording history for AI agents.
 
 **License**: MIT
