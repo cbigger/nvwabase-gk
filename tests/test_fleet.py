@@ -191,5 +191,55 @@ class SweepTests(unittest.TestCase):
             fleet.sweep(fleet.Fleet(self.root))
 
 
+class CommanderLoopTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name) / ".fleet"
+        _init_unit(self.root, "u01", "a unit")
+        self.fleet = fleet.Fleet(self.root)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_loop_stops_on_stop_decision(self):
+        decisions = [
+            {"action": "work", "target": "u01", "note": "slice"},
+            {"action": "stop", "reason": "all done"},
+        ]
+        with mock.patch.object(fleet, "command_step", side_effect=decisions), \
+             mock.patch.object(fleet.time, "sleep"):
+            rc = fleet.command_loop(self.fleet, interval=0)
+        self.assertEqual(rc, 10)
+        st = self.fleet.load_commander_state()
+        self.assertEqual(st["iterations"], 2)
+        self.assertTrue(st["stopped"])
+        self.assertEqual(st["stop_reason"], "all done")
+
+    def test_loop_respects_max_cycles(self):
+        with mock.patch.object(fleet, "command_step",
+                               return_value={"action": "work", "target": "u01"}) as step, \
+             mock.patch.object(fleet.time, "sleep"):
+            rc = fleet.command_loop(self.fleet, interval=0, max_cycles=3)
+        self.assertEqual(rc, 0)
+        self.assertEqual(step.call_count, 3)
+        self.assertEqual(self.fleet.load_commander_state()["iterations"], 3)
+
+    def test_loop_resumes_iteration_count(self):
+        self.fleet.save_commander_state({"iterations": 5, "history": [], "stopped": False})
+        with mock.patch.object(fleet, "command_step",
+                               return_value={"action": "work", "target": "u01"}), \
+             mock.patch.object(fleet.time, "sleep"):
+            fleet.command_loop(self.fleet, interval=0, max_cycles=6)
+        # resumed at 5, ran one more cycle to hit the cap of 6
+        self.assertEqual(self.fleet.load_commander_state()["iterations"], 6)
+
+    def test_loop_history_is_trimmed(self):
+        with mock.patch.object(fleet, "command_step",
+                               return_value={"action": "work", "target": "u01"}), \
+             mock.patch.object(fleet.time, "sleep"):
+            fleet.command_loop(self.fleet, interval=0, max_cycles=25)
+        self.assertEqual(len(self.fleet.load_commander_state()["history"]), fleet._HISTORY_KEEP)
+
+
 if __name__ == "__main__":
     unittest.main()
