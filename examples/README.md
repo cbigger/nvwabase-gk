@@ -52,13 +52,12 @@ fgc status      # picks up exactly where you left off
 fgc graph       # full history of facts + intents
 ```
 
-## custom schema (e.g. a security profile)
+## custom schema (optional)
 
-Edit `templates/reason.md` to constrain the commander, e.g.:
+Edit `templates/reason.md` to constrain the commander to a typed vocabulary, e.g.:
 
-> Each intent must target exactly one of: attack-surface, trust-boundary,
-> payload, repro-evidence, verdict, false-positive-reason. State which.
+> Each fact must be one of: source, finding, artifact, decision, risk. State which.
 
-Now the graph naturally accumulates a structured security finding instead of
-free-form facts — same idea as StarVoya's `dispatch_appsec.yaml` profile, but
-with no YAML, no dispatcher, and no worker pool.
+Now the graph naturally accumulates structured, typed facts instead of
+free-form notes — the same effect a heavyweight dispatcher gets from a YAML
+profile, but with no YAML, no dispatcher, and no worker pool.

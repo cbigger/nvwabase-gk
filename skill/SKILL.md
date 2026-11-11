@@ -11,9 +11,9 @@ opt-in switch: until you run it in a project, the fact-graph does nothing
 there. After you run it, that one project auto-reads and auto-maintains its
 graph on every turn.
 
-This replaces the StarVoya `Star` backend's "create a project + start the
-dispatcher" step, but with zero servers — it just drops a local `.fg/` and
-writes the two hook entries into **this project's** `.claude/settings.json`.
+It is the "create a project + start the dispatcher" step of a heavyweight agent
+backend, but with zero servers — it just drops a local `.fg/` and writes the
+two hook entries into **this project's** `.claude/settings.json`.
 
 ## What it does
 

@@ -2293,7 +2293,7 @@ def _load_template(templates_dir: Path, name: str) -> str:
 
 
 def _classify_reason_payload(payload: dict) -> tuple[str, dict | list | None]:
-    """Mirror Star's reason contract: complete | intents | noop | rejected."""
+    """The reason contract: complete | intents | noop | rejected."""
     if not isinstance(payload, dict):
         raise FGError("reason payload must be a JSON object")
     if payload.get("accepted") is False:

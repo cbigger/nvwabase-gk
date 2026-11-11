@@ -11,12 +11,12 @@ A **fact graph** is shared working memory for agentic work: a DAG where
 are edges. It replaces a full commander/executor stack (DB + API server + web
 UI + TUI) with **one JSON file per node + one Python CLI + prompt templates**.
 
-This is a distillation of the StarVoya `Star` backend idea. StarVoya is a
-~9,600-line Python/FastAPI system with a SQLite DB, dispatcher loop, container
-runtime, and a TypeScript TUI. Most of that weight exists to run *outside*
-Claude Code. **Inside Claude Code you already have the executor (Claude), the
-scheduler (you), and the UI (this chat).** All that's missing is the durable,
-queryable fact graph. That's what `fgc` provides.
+This is a distillation of a heavyweight agent backend — the kind that pairs a
+database, a dispatcher loop, a container runtime, and a web/TUI front end — most
+of whose weight exists to run *outside* Claude Code. **Inside Claude Code you
+already have the executor (Claude), the scheduler (you), and the UI (this
+chat).** All that's missing is the durable, queryable fact graph. That's what
+`fgc` provides.
 
 ## Scope — strictly per-project (IMPORTANT)
 
@@ -262,7 +262,7 @@ as opt-in per run, never as the default.
 
 The templates are plain markdown with `{placeholder}` substitution. Edit
 `templates/*.md` to tune the commander/executor behavior (e.g. constrain facts
-to a security-finding schema, like StarVoya's `appsec` profile). Available
+to a typed vocabulary such as source/finding/artifact/decision/risk). Available
 placeholders: `{origin}`, `{goal}`, `{graph_yaml}`, `{fact_ids}`,
 `{open_intents}`, `{hints}`, `{max_intents}` (reason); `{graph_yaml}`,
 `{intent_id}`, `{intent_description}` (explore); `{intent_description}`,
