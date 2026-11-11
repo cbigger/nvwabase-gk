@@ -39,8 +39,8 @@ AI_CHANNEL_NAME = "ai-channel.txt"
 PEER_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+$")
 _UNSET = object()
 
-# Typed facts: a node carries an optional free-form `kind` (a domain type such
-# as "indicator" or "host") plus a `data` bag of key=value attributes. The
+# Typed facts: a node carries an optional free-form `kind` (a type such
+# as "source" or "finding") plus a `data` bag of key=value attributes. The
 # engine is domain-neutral — it stores arbitrary kind strings and never
 # enumerates them; a domain's doctrine supplies the vocabulary. Untyped nodes
 # default to DEFAULT_KIND, so pre-existing graphs load unchanged.
@@ -3348,9 +3348,9 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("fact", help="add a confirmed fact")
     sp.add_argument("description", help="summary (one sentence) — the gist of this node")
     sp.add_argument("--kind", "-k", default=None,
-                    help="domain type of this fact (free-form slug, e.g. host, indicator); default 'note'")
+                    help="type of this fact (free-form slug, e.g. source, finding); default 'note'")
     sp.add_argument("--data", "-d", action="append", metavar="KEY=VALUE", default=None,
-                    help="structured attribute (repeatable), e.g. -d type=ip -d value=1.2.3.4")
+                    help="structured attribute (repeatable), e.g. -d name=libfoo -d url=example.com")
     sp.add_argument("--title", "-t", default=None,
                     help="short human title shown in the graph view (中文标题)")
     sp.add_argument("--doc", default=None,

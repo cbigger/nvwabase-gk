@@ -15,11 +15,12 @@ One JSON file per entry under `entries/`:
 Use it:
 
 ```
-fgc kb search "timeline"        # keyword search (title/tags weighted over body)
+fgc kb search "<keywords>"      # keyword search (title/tags weighted over body)
 fgc kb list                     # all entries
-fgc kb show timeline-reconstruction
+fgc kb show <id>
 fgc kb add --title "..." --tags "a,b" --body "..."
 ```
 
-The two entries shipped here are neutral incident-response examples. Replace or
-extend them with your own domain's playbooks; ship the KB empty if you prefer.
+The engine is domain-agnostic; the contents are the domain part. Fill the KB
+with your own playbooks, or leave it empty — nothing in the base depends on a
+particular entry.

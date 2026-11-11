@@ -19,12 +19,12 @@ class KBTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_add_get_list_roundtrip(self):
-        e = self.kb.add("Triage Checklist", body="step one", tags=["triage", "ir"])
-        self.assertEqual(e["id"], "triage-checklist")
-        got = self.kb.get("triage-checklist")
-        self.assertEqual(got["title"], "Triage Checklist")
-        self.assertEqual(got["tags"], ["triage", "ir"])
-        self.assertEqual([x["id"] for x in self.kb.list()], ["triage-checklist"])
+        e = self.kb.add("Build Checklist", body="step one", tags=["build", "ci"])
+        self.assertEqual(e["id"], "build-checklist")
+        got = self.kb.get("build-checklist")
+        self.assertEqual(got["title"], "Build Checklist")
+        self.assertEqual(got["tags"], ["build", "ci"])
+        self.assertEqual([x["id"] for x in self.kb.list()], ["build-checklist"])
 
     def test_add_explicit_id_and_overwrite_guard(self):
         self.kb.add("A", entry_id="x", body="first")
@@ -44,10 +44,10 @@ class KBTests(unittest.TestCase):
             self.kb.get("../etc/passwd")
 
     def test_search_ranks_title_over_body(self):
-        self.kb.add("Timeline reconstruction", tags=["forensics"], body="order events")
-        self.kb.add("Noise", body="a timeline is mentioned once in the body")
-        results = self.kb.search("timeline")
-        self.assertEqual(results[0]["id"], "timeline-reconstruction")  # title hit wins
+        self.kb.add("Cache benchmark", tags=["perf"], body="measure throughput")
+        self.kb.add("Noise", body="a cache is mentioned once in the body")
+        results = self.kb.search("cache")
+        self.assertEqual(results[0]["id"], "cache-benchmark")  # title hit wins
         self.assertEqual(results[0]["score"], 3)
 
     def test_search_empty_query_returns_nothing(self):
@@ -56,8 +56,8 @@ class KBTests(unittest.TestCase):
 
     def test_search_limit(self):
         for i in range(5):
-            self.kb.add(f"alert entry {i}", body="alert")
-        self.assertEqual(len(self.kb.search("alert", limit=2)), 2)
+            self.kb.add(f"source entry {i}", body="source")
+        self.assertEqual(len(self.kb.search("source", limit=2)), 2)
 
     def test_damaged_entry_is_skipped_not_fatal(self):
         self.kb.add("good", body="findable token zebra")
@@ -75,12 +75,10 @@ class KBTests(unittest.TestCase):
 
 
 class ShippedEntriesTests(unittest.TestCase):
-    def test_repo_kb_entries_are_valid_and_searchable(self):
+    def test_repo_kb_loads_cleanly(self):
+        # The base ships no domain entries; the shipped KB must still load.
         store = kb.KB(ROOT / "kb")
-        ids = {e["id"] for e in store.list()}
-        self.assertIn("ir-triage-checklist", ids)
-        self.assertIn("timeline-reconstruction", ids)
-        self.assertTrue(store.search("triage alert"))
+        self.assertIsInstance(store.list(), list)
 
 
 if __name__ == "__main__":

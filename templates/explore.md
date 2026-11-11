@@ -50,12 +50,12 @@ Reject only when execution is clearly inappropriate:
 
 Normal return — the incremental fact this intent produced:
 ```json
-{"accepted": true, "data": {"title": "中间件已修复", "description": "one-sentence gist of what you confirmed", "kind": "finding", "fields": {"severity": "high", "host": "web-01"}, "doc": "optional detailed markdown: exact commands run, output, changed files, evidence", "deviations": [{"planned": "...", "actual": "...", "reason": "..."}]}}
+{"accepted": true, "data": {"title": "short title", "description": "one-sentence gist of what you confirmed", "kind": "finding", "fields": {"severity": "high", "supports": "f003"}, "doc": "optional detailed markdown: exact commands run, output, changed files, evidence", "deviations": [{"planned": "...", "actual": "...", "reason": "..."}]}}
 ```
 
 The `kind` and `fields` are OPTIONAL typed-fact metadata. `kind` is a short
-domain type for this fact (your domain's taxonomy — e.g. `indicator`, `host`,
-`finding`); omit it and the fact stores as the default `note`. `fields` is a
+type for this fact (e.g. `source`, `finding`, `artifact`); omit it and the
+fact stores as the default `note`. `fields` is a
 flat object of `key: value` strings carrying the fact's structured attributes
 (it is named `fields`, not `data`, because `data` is this envelope's wrapper).
 Use them when the fact has a type and attributes worth counting or correlating.
