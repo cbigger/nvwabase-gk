@@ -235,6 +235,9 @@ case "${1:-}" in
   list)   shift; cmd_list "$@" ;;
   kill)   shift; cmd_kill "$@" ;;
   board)  shift; cmd_board "$@" ;;
+  fleet)   shift; exec python3 "$SCRIPT_DIR/lib/fleet.py" "$@" ;;
+  command) shift; exec python3 "$SCRIPT_DIR/lib/fleet.py" command "$@" ;;
+  sweep)   shift; exec python3 "$SCRIPT_DIR/lib/fleet.py" sweep "$@" ;;
   help|-h|--help)
     cat <<'USAGE'
 nvwa — the Nüwa Foundation CLI (Create + Language + History)
@@ -254,6 +257,13 @@ Language:
 Roster:
   list                                                    all live agents
   board                                                   agents + graph state
+
+Fleet (multi-graph commander — many per-unit graphs at once):
+  fleet init <unit> --goal "..."                          create a unit graph
+  fleet status [--budget B]                               cross-graph board
+  command [--budget B]                                    one LLM allocation step (work/hire/fire/stop)
+  sweep [--rounds R]                                      round-robin an auto slice over open units
+  fleet up | fleet down                                   hire a worker per open unit | stop all
 
 History (same as fgc — shared fact-intent graph):
   fact / intent / status / graph / frontier / recall / dispatch / auto / tier / ...
