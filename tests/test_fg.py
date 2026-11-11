@@ -386,5 +386,102 @@ class TierTests(unittest.TestCase):
             self.assertEqual(fg.cmd_tier(cheap), 0)
 
 
+class TypedFactsTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = fg.Store(Path(self.tmp.name) / ".fg")
+        self.store.init("test", "ship it")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_fact_stores_kind_and_data(self):
+        f = self.store.add_fact(
+            "c2 domain confirmed", creator="user", source_intent=None,
+            kind="indicator", data={"type": "domain", "value": "evil.example"},
+        )
+        self.assertEqual(f["kind"], "indicator")
+        self.assertEqual(f["data"], {"type": "domain", "value": "evil.example"})
+        # round-trips through disk
+        self.assertEqual(self.store.get_fact(f["id"])["kind"], "indicator")
+
+    def test_untyped_fact_defaults_to_note_with_empty_data(self):
+        f = self.store.add_fact("plain obs", creator="user", source_intent=None)
+        self.assertEqual(f["kind"], fg.DEFAULT_KIND)
+        self.assertEqual(f["data"], {})
+
+    def test_data_values_coerced_to_strings(self):
+        f = self.store.add_fact(
+            "o", creator="user", source_intent=None,
+            data={"count": 3, "reversible": True, "score": 1.5},
+        )
+        self.assertEqual(f["data"], {"count": "3", "reversible": "true", "score": "1.5"})
+
+    def test_bad_kind_and_bad_data_rejected(self):
+        with self.assertRaisesRegex(fg.FGError, "kind must be"):
+            self.store.add_fact("o", creator="user", source_intent=None, kind="has spaces")
+        with self.assertRaisesRegex(fg.FGError, "data must be"):
+            self.store.add_fact("o", creator="user", source_intent=None, data=["nope"])
+        with self.assertRaisesRegex(fg.FGError, "data value"):
+            self.store.add_fact("o", creator="user", source_intent=None,
+                                data={"nested": {"x": 1}})
+
+    def test_parse_data_pairs(self):
+        self.assertEqual(fg.parse_data_pairs(["a=1", "b=c=d"]), {"a": "1", "b": "c=d"})
+        self.assertEqual(fg.parse_data_pairs(None), {})
+        with self.assertRaisesRegex(fg.FGError, "key=value"):
+            fg.parse_data_pairs(["noeq"])
+
+    def test_done_produces_typed_fact(self):
+        f0 = self.store.add_fact("seed", creator="user", source_intent=None)
+        i = self.store.add_intent([f0["id"]], "isolate host", creator="user")
+        fact, intent = self.store.conclude_with_new_fact(
+            i["id"], "host isolated", "worker",
+            kind="finding", data={"host": "web-01"},
+        )
+        self.assertEqual(fact["kind"], "finding")
+        self.assertEqual(fact["data"], {"host": "web-01"})
+        self.assertEqual(intent["status"], "done")
+
+    def test_intent_stores_kind(self):
+        f0 = self.store.add_fact("seed", creator="user", source_intent=None)
+        i = self.store.add_intent([f0["id"]], "propose containment", creator="user",
+                                  kind="containment")
+        self.assertEqual(self.store.get_intent(i["id"])["kind"], "containment")
+
+    def test_preexisting_kindless_node_loads_and_defaults(self):
+        # a node written before typed facts (no kind/data) must still load
+        f = self.store.add_fact("legacy", creator="user", source_intent=None)
+        path = self.store.facts_dir / f"{f['id']}.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        del raw["kind"]
+        del raw["data"]
+        path.write_text(json.dumps(raw), encoding="utf-8")
+        loaded = self.store.get_fact(f["id"])  # does not raise
+        self.assertEqual(fg.node_kind(loaded), fg.DEFAULT_KIND)
+        self.assertEqual(fg.validate_graph(self.store), [])
+
+    def test_graph_shows_kind_tag_only_for_typed_nodes(self):
+        self.store.add_fact("typed", creator="user", source_intent=None, kind="host")
+        self.store.add_fact("plain", creator="user", source_intent=None)
+        text = fg.render_graph_text(self.store)
+        self.assertIn("<host>", text)
+        self.assertNotIn("<note>", text)  # default kind stays invisible
+
+    def test_explore_payload_carries_kind_and_fields(self):
+        payload = {"accepted": True, "data": {
+            "description": "beaconing confirmed", "kind": "indicator",
+            "fields": {"type": "ip", "value": "1.2.3.4"}}}
+        title, desc, doc, kind, data = fg._parse_explore_payload(payload)
+        self.assertEqual(kind, "indicator")
+        self.assertEqual(data, {"type": "ip", "value": "1.2.3.4"})
+
+    def test_explore_payload_without_typed_fields(self):
+        payload = {"accepted": True, "data": {"description": "plain result"}}
+        title, desc, doc, kind, data = fg._parse_explore_payload(payload)
+        self.assertIsNone(kind)
+        self.assertEqual(data, {})
+
+
 if __name__ == "__main__":
     unittest.main()

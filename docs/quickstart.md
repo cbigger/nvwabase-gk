@@ -27,18 +27,25 @@ Record a confirmed observation (a **fact**), then a **unit of work** (an
 **intent**) that depends on it:
 
 ```bash
-fgc fact "web-01 is running the alerted process" --title "process confirmed"
+fgc fact "web-01 is running the alerted process" --title "process confirmed" \
+    -k host -d hostname=web-01 -d status=suspect
 #   -> f001
 fgc intent --from f001 "pull auth logs for web-01 around the alert time"
 #   -> i001
-fgc graph                      # facts + intents
+fgc graph                      # facts + intents (kinds shown inline)
+fgc graph -k host              # only facts/intents of kind 'host'
 fgc frontier                   # intents ready to work
 ```
 
 Facts carry a one-line description plus an optional `--title` and `--doc`
-(or `--doc-file`). Intents depend on one or more fact ids via `--from`
-(the special `goal` fact can't be a dependency — seed a fact first, as above).
-Use `--confirm` on an intent that must not run without human sign-off.
+(or `--doc-file`). A fact can also be **typed**: `-k <kind>` tags it with a
+free-form domain type and `-d key=value` (repeatable) attaches structured
+attributes, which the commander can count and filter on (`fgc graph -k host`).
+Kinds are arbitrary strings — the engine never enumerates them — and an untyped
+fact defaults to the kind `note`. `fgc done` and `fgc intent` take the same
+`-k`/`-d`. Intents depend on one or more fact ids via `--from` (the special
+`goal` fact can't be a dependency — seed a fact first, as above). Use
+`--confirm` on an intent that must not run without human sign-off.
 
 ## 2. Drive it with the LLM
 
