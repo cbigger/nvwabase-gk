@@ -1621,14 +1621,171 @@ def cmd_confirm(args) -> int:
     return 0
 
 
+# --------------------------------------------------------------------------- #
+# model tiering
+# --------------------------------------------------------------------------- #
+# A tier map routes roles -> tiers -> a model (and optional endpoint/token), so
+# the commander and hard/high-stakes steps run on a STRONG model while the mass
+# of workers runs CHEAP. The policy lives in doctrine/commander-doctrine.md
+# (Part B); this is the mechanism that reads it.
+#
+# Config source: the FG_TIERS env var, holding either inline JSON or a path to a
+# JSON file. Shape (every key optional; omitted keys fall back to the defaults):
+#   {"tiers": {"strong": {"model": "...", "base_url": "...", "token": "..."},
+#              "cheap":  {"model": "..."}},
+#    "roles": {"commander": "strong", "worker": "cheap", ...},
+#    "limits": {"max_strong_concurrent": 3, "backup_pool": [...]}}
+#
+# With no config (or a single model), both tiers resolve to the same default
+# model, so behavior is unchanged — tiering degrades gracefully into plain use.
+
+def _default_model() -> str:
+    return os.environ.get("FG_MODEL", "sonnet")
+
+
+def load_tier_config(raw: str | None = None) -> dict:
+    """Build the tier map from FG_TIERS (inline JSON or a path), merged over
+    defaults. `raw` overrides the env var (used by tests)."""
+    dm = _default_model()
+    cfg = {
+        "tiers": {"strong": {"model": dm}, "cheap": {"model": dm}},
+        "roles": {
+            "commander": "strong", "senior": "strong", "verifier": "strong",
+            "worker": "cheap", "scout": "cheap", "chore": "cheap",
+        },
+        "limits": {"max_strong_concurrent": 3, "backup_pool": []},
+    }
+    src = raw if raw is not None else os.environ.get("FG_TIERS")
+    if src and src.strip():
+        s = src.strip()
+        if s[:1] in ("{", "["):
+            text = s
+        else:
+            path = Path(s).expanduser()
+            if not path.exists():
+                raise FGError(f"tier config file not found: {s}")
+            text = path.read_text(encoding="utf-8")
+        try:
+            user = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise FGError(f"invalid tier config JSON: {exc}")
+        if not isinstance(user, dict):
+            raise FGError("tier config must be a JSON object")
+        if "tiers" in user:
+            if not isinstance(user["tiers"], dict):
+                raise FGError("tier config 'tiers' must be an object")
+            for tname, tspec in user["tiers"].items():
+                if not isinstance(tspec, dict):
+                    raise FGError(f"tier '{tname}' must be an object")
+                base = dict(cfg["tiers"].get(tname, {"model": dm}))
+                base.update(tspec)
+                cfg["tiers"][tname] = base
+        for key in ("roles", "limits"):
+            if key in user:
+                if not isinstance(user[key], dict):
+                    raise FGError(f"tier config '{key}' must be an object")
+                cfg[key].update(user[key])
+    for tname, tspec in cfg["tiers"].items():
+        if not str(tspec.get("model", "")).strip():
+            raise FGError(f"tier '{tname}' needs a non-empty model")
+    return cfg
+
+
+def resolve_tier(cfg: dict, *, role: str | None = None, tier: str | None = None) -> str:
+    """The tier an explicit --tier names, else the tier a role maps to
+    (default role: worker)."""
+    if tier:
+        if tier not in cfg["tiers"]:
+            raise FGError(f"unknown tier '{tier}' (have: {', '.join(sorted(cfg['tiers']))})")
+        return tier
+    r = role or "worker"
+    if r not in cfg["roles"]:
+        raise FGError(f"unknown role '{r}' (have: {', '.join(sorted(cfg['roles']))})")
+    t = cfg["roles"][r]
+    if t not in cfg["tiers"]:
+        raise FGError(f"role '{r}' maps to unknown tier '{t}'")
+    return t
+
+
+def resolve_model(cfg: dict, *, role: str | None = None, tier: str | None = None,
+                  model: str | None = None) -> str:
+    """Explicit model wins; otherwise the resolved tier's model."""
+    if model and model.strip():
+        return model.strip()
+    t = resolve_tier(cfg, role=role, tier=tier)
+    m = str(cfg["tiers"][t].get("model", "")).strip()
+    if not m:
+        raise FGError(f"tier '{t}' has no model")
+    return m
+
+
+def tier_connection(cfg: dict, tier: str) -> dict:
+    """Optional endpoint/token for a tier (the key-pool entry), empty if none."""
+    spec = cfg["tiers"].get(tier, {})
+    out = {}
+    if str(spec.get("base_url", "")).strip():
+        out["base_url"] = str(spec["base_url"]).strip()
+    if str(spec.get("token", "")).strip():
+        out["token"] = str(spec["token"]).strip()
+    return out
+
+
+def strong_cap(cfg: dict) -> int:
+    try:
+        return int(cfg["limits"].get("max_strong_concurrent", 3))
+    except (TypeError, ValueError):
+        return 3
+
+
+def cmd_tier(args) -> int:
+    """Inspect and resolve the tier map (no graph needed)."""
+    cfg = load_tier_config()
+    action = args.tier_action
+    if action == "show":
+        print(json.dumps(cfg, indent=2, ensure_ascii=False))
+        return 0
+    if action == "resolve":
+        print(resolve_model(cfg, role=args.role, tier=args.tier, model=args.model))
+        return 0
+    if action == "can-spawn":
+        t = resolve_tier(cfg, role=args.role, tier=args.tier)
+        m = resolve_model(cfg, role=args.role, tier=args.tier, model=args.model)
+        if t == "strong":
+            active = max(0, args.active_strong)
+            cap = strong_cap(cfg)
+            if active >= cap:
+                sys.stderr.write(
+                    f"fgc: strong-tier cap reached ({active}/{cap}) — "
+                    f"free a strong worker before spawning another\n"
+                )
+                return 3
+        lines = [f"tier\t{t}", f"model\t{m}"]
+        conn = tier_connection(cfg, t)
+        if "base_url" in conn:
+            lines.append(f"base_url\t{conn['base_url']}")
+        if "token" in conn:
+            lines.append(f"token\t{conn['token']}")
+        print("\n".join(lines))
+        return 0
+    raise FGError(f"unknown tier action '{action}'")
+
+
 # -- dispatch (LLM) --
 def cmd_dispatch(args) -> int:
     store = Store(Path(args.store))
     store.require()
-    model = args.model
+    # Resolve the model by tier/role: an explicit --model wins, else --tier,
+    # else the role (inferred from the dispatch target when --role is absent).
+    role_by_target = {
+        "reason": "commander", "brainstorm": "commander",
+        "blindspot": "commander", "verify": "verifier",
+    }
+    default_role = role_by_target.get(args.target, "worker")
+    cfg = load_tier_config()
+    model = resolve_model(
+        cfg, role=(args.role or default_role), tier=args.tier, model=args.model
+    )
     timeout = args.timeout
-    if not isinstance(model, str) or not model.strip():
-        raise FGError("--model cannot be empty")
     if timeout < 1:
         raise FGError("--timeout must be at least 1 second")
     skip = args.skip_permissions
@@ -2437,7 +2594,20 @@ def cmd_auto(args) -> int:
     store = Store(Path(args.store))
     store.require()
     templates_dir = Path(args.templates)
-    model = args.model
+    # Per-role model resolution: by default the reason step runs on the
+    # commander tier, explore on the worker tier, verify on the verifier tier.
+    # An explicit --model / --tier / --role forces one model for every step.
+    cfg = load_tier_config()
+    if args.model:
+        m_reason = m_explore = m_verify = resolve_model(cfg, model=args.model)
+    elif args.tier:
+        m_reason = m_explore = m_verify = resolve_model(cfg, tier=args.tier)
+    elif args.role:
+        m_reason = m_explore = m_verify = resolve_model(cfg, role=args.role)
+    else:
+        m_reason = resolve_model(cfg, role="commander")
+        m_explore = resolve_model(cfg, role="worker")
+        m_verify = resolve_model(cfg, role="verifier")
     timeout = args.timeout
     skip = args.skip_permissions
     cwd = Path.cwd()
@@ -2452,7 +2622,10 @@ def cmd_auto(args) -> int:
     verify = args.verify
     dry = args.dry_run
 
-    print(f"[auto] start  model={model} max_steps={max_steps} verify={verify}")
+    print(
+        f"[auto] start  models(reason={m_reason},explore={m_explore},"
+        f"verify={m_verify}) max_steps={max_steps} verify={verify}"
+    )
     noop_streak = 0
     explore_count = 0
     for step in range(1, max_steps + 1):
@@ -2467,11 +2640,11 @@ def cmd_auto(args) -> int:
         if dry:
             # dry-run prints the rendered prompt; it never mutates the graph,
             # so one pass is enough (review L5: don't repeat max_steps times).
-            _dispatch_reason(store, templates_dir, model, timeout, skip, cwd, args)
+            _dispatch_reason(store, templates_dir, m_reason, timeout, skip, cwd, args)
             break
         try:
             kind, summary = _run_reason_raw(
-                store, templates_dir, model, timeout, skip, cwd
+                store, templates_dir, m_reason, timeout, skip, cwd
             )
         except FGError as exc:
             print(f"[auto] step {step}: reason failed: {exc}")
@@ -2491,7 +2664,7 @@ def cmd_auto(args) -> int:
         noop_streak = 0
 
         # 2) explore each ready intent, up to the per-step cap
-        auto_worker = _worker_id(model)
+        auto_worker = _worker_id(m_explore)
         ready = [
             i for i in frontier(store)
             if not i.get("worker") or i.get("worker") == auto_worker
@@ -2512,7 +2685,7 @@ def cmd_auto(args) -> int:
             print(f"[auto] step {step}.2 explore {intent['id']}")
             try:
                 _run_explore_raw(
-                    store, templates_dir, intent, model, timeout, skip, cwd,
+                    store, templates_dir, intent, m_explore, timeout, skip, cwd,
                     claim=True,
                 )
             except FGError as exc:
@@ -2527,7 +2700,7 @@ def cmd_auto(args) -> int:
                     print(f"[auto] step {step}.3 verify {iid}")
                     try:
                         verified, issues = _run_verify_raw(
-                            store, templates_dir, refreshed, model, timeout, skip, cwd
+                            store, templates_dir, refreshed, m_verify, timeout, skip, cwd
                         )
                         tag = "VERIFIED" if verified else "FAILED"
                         print(f"[auto]        verify {iid} -> {tag}" + (f": {issues}" if issues else ""))
@@ -3157,7 +3330,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("dispatch", help="run a commander/executor step via the claude CLI")
     sp.add_argument("target", help="'reason' | 'verify' | <intent-id>")
-    sp.add_argument("--model", default=os.environ.get("FG_MODEL", "sonnet"))
+    sp.add_argument("--model", default=None,
+                    help="model override; else resolved from the tier map by tier/role")
+    sp.add_argument("--tier", default=None, help="force a tier (e.g. strong|cheap)")
+    sp.add_argument("--role", default=None,
+                    help="role for tier resolution (default inferred from target)")
     sp.add_argument("--timeout", type=int, default=int(os.environ.get("FG_TIMEOUT", "600")))
     sp.add_argument("--templates", default=None, help="templates dir (default: <store>/../templates or SKILL dir)")
     sp.add_argument("--skip-permissions", action="store_true",
@@ -3225,7 +3402,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser(
         "auto", help="drive the whole graph forward: reason -> explore -> verify -> repeat"
     )
-    sp.add_argument("--model", default=os.environ.get("FG_MODEL", "sonnet"))
+    sp.add_argument("--model", default=None,
+                    help="one model for every step; else per-role tier resolution")
+    sp.add_argument("--tier", default=None, help="force one tier for every step")
+    sp.add_argument("--role", default=None, help="force one role's tier for every step")
     sp.add_argument("--timeout", type=int, default=int(os.environ.get("FG_TIMEOUT", "600")))
     sp.add_argument("--templates", default=None)
     sp.add_argument("--skip-permissions", action="store_true")
@@ -3234,6 +3414,26 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--max-steps", type=int, default=8, help="max reason iterations")
     sp.add_argument("--max-explore", type=int, default=6, help="cap on explore dispatches")
     sp.set_defaults(func=cmd_auto)
+
+    sp = sub.add_parser(
+        "tier",
+        help="inspect/resolve the model-tier map (FG_TIERS)",
+        description=(
+            "Resolve roles -> tiers -> models from the tier map in FG_TIERS "
+            "(inline JSON or a path). With no config, every tier resolves to the "
+            "default model, so tiering degrades gracefully."
+        ),
+    )
+    sp.add_argument(
+        "tier_action", choices=["show", "resolve", "can-spawn"],
+        help="show the map | resolve a model | check the strong-concurrency cap",
+    )
+    sp.add_argument("--role", default=None, help="role to resolve (default: worker)")
+    sp.add_argument("--tier", default=None, help="force a tier")
+    sp.add_argument("--model", default=None, help="explicit model override")
+    sp.add_argument("--active-strong", type=int, default=0,
+                    help="(can-spawn) number of strong workers already running")
+    sp.set_defaults(func=cmd_tier)
 
     return p
 
