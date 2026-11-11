@@ -2,8 +2,8 @@
 
 A rebuilt version of [nvwabase](https://github.com/N1nEmAn/nvwabase) that
 incorporates some lessons from [sapper-v2](https://github.com/N1nEmAn/sapper-v2):
-a generalized commander doctrine, model tiering, a multi-graph commander, a
-knowledge base, and typed facts.
+a generalized commander doctrine, model tiering, multi-graph fleet
+orchestration, a knowledge base, and typed facts.
 
 A shared **fact-intent graph** for long-horizon, multi-agent work, plus a thin
 orchestration layer that runs many agents and many graphs at once. Pure Python
