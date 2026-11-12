@@ -132,4 +132,4 @@ fgc kb add --title "Benchmark method" --tags "method,perf" --body "warm up, meas
 ## Where next
 
 - [doctrine/commander-doctrine.md](../doctrine/commander-doctrine.md) — how a commander should allocate and escalate.
-- [SKILL.md](../SKILL.md) — the full `fgc` command reference.
+- [skill/SKILL.md](../skill/SKILL.md) — the installed skill and the full `fgc` + `nvwa` command reference.
